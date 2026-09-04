@@ -22,3 +22,6 @@ collector.toml
 *.swp
 .idea/
 .vscode/
+
+# web dashboard build output (di-copy dari web/dist)
+collector/web-dist/

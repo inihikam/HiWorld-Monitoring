@@ -1,0 +1,14 @@
+/* M3 placeholder tokens — lengkap (dark+light) di WD4. */
+:root {
+  --md-primary: #a8c7fa;
+  --md-on-primary: #062e6f;
+  --md-surface: #101418;
+  --md-on-surface: #e1e2e8;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+}
