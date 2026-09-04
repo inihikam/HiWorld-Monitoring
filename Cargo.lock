@@ -676,6 +676,7 @@ dependencies = [
  "clap",
  "futures-util",
  "hiworld-core",
+ "hyper-util",
  "reqwest",
  "rusqlite",
  "serde",

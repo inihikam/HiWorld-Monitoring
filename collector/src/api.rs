@@ -101,6 +101,9 @@ pub struct AppState {
     pub sessions: Mutex<HashMap<String, String>>,
     /// Broadcast realtime (WS1/WS3) — klien dashboard subscribe di sini.
     pub hub: crate::hub::BroadcastHub,
+    /// Snapshot terakhir per host — sumber "hello" bootstrap (WS4).
+    /// Poller update setiap insert; rusqlite-free (RAM).
+    pub latest_snapshots: Mutex<std::collections::HashMap<String, hiworld_core::models::Snapshot>>,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -125,6 +128,7 @@ impl AppState {
             started_at_ms: now_ms(),
             sessions: Mutex::new(HashMap::new()),
             hub: crate::hub::BroadcastHub::new(1024),
+            latest_snapshots: Mutex::new(HashMap::new()),
         }))
     }
 }

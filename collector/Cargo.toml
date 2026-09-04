@@ -21,6 +21,7 @@ bytes = "1"
 tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
 wiremock = "0.6"

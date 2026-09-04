@@ -58,6 +58,42 @@ pub async fn ws_handler(
 async fn ws_loop(state: SharedState, mut socket: axum::extract::ws::WebSocket) {
     let mut rx = state.hub.subscribe();
 
+    // WS4: hello bootstrap — daftar SEMUA host terdaftar (store) + snapshot
+    // terakhir bila ada (latest_snapshots RAM).
+    {
+        let registered: Vec<String> = state
+            .store
+            .lock()
+            .unwrap()
+            .list_hosts()
+            .map(|hs| hs.into_iter().map(|h| h.host_id).collect())
+            .unwrap_or_default();
+        let hosts: Vec<serde_json::Value> = {
+            let latest = state.latest_snapshots.lock().unwrap();
+            registered
+                .iter()
+                .map(|host_id| {
+                    serde_json::json!({
+                        "host_id": host_id,
+                        "latest": latest.get(host_id),
+                    })
+                })
+                .collect()
+        }; // guard dropped di sini — sebelum .await
+        let hello = serde_json::json!({
+            "type": "hello",
+            "data": { "hosts": hosts },
+        })
+        .to_string();
+        if socket
+            .send(axum::extract::ws::Message::Text(hello.into()))
+            .await
+            .is_err()
+        {
+            return;
+        }
+    }
+
     // keepalive ping 30s (WS-10) — task terpisah, abort saat loop selesai
     let (ping_tx, mut ping_rx) = tokio::sync::mpsc::channel::<()>(1);
     let ping_task = tokio::spawn(async move {
