@@ -17,9 +17,9 @@ impl ProcFs {
         Self { root: root.into() }
     }
 
-    /// /proc asli (produksi).
+    /// /proc asli (produksi). /proc di-mount di /proc, bukan /.
     pub fn system() -> Self {
-        Self::at_root("/")
+        Self::at_root("/proc")
     }
 
     fn read(&self, rel: &[&str]) -> Result<String, ParseError> {

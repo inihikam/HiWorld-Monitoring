@@ -142,3 +142,46 @@ impl<H: RegisterHttp, C: RegistrarClock> Registrar<H, C> {
         RegisterAttempt::GaveUp
     }
 }
+
+// ---------- impl produksi (dipakai runtime.rs, Task SR4) ----------
+
+/// HTTP produksi via reqwest (rustls). Trait sinkron; block_on di thread blocking.
+pub struct SystemRegisterHttp;
+
+impl SystemRegisterHttp {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for SystemRegisterHttp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RegisterHttp for SystemRegisterHttp {
+    fn post_register(&self, url: &str, body: &str) -> Result<u16, RegisterError> {
+        // Trait sinkron; pemanggil (spawn_blocking) sudah di thread terpisah.
+        // Gunakan reqwest::blocking agar tidak butuh runtime tokio di sini.
+        let resp = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .map_err(|e| RegisterError::Connect(e.to_string()))?
+            .post(url)
+            .header("Content-Type", "application/json")
+            .body(body.to_string())
+            .send()
+            .map_err(|e| RegisterError::Connect(e.to_string()))?;
+        Ok(resp.status().as_u16())
+    }
+}
+
+/// Clock produksi: thread::sleep (registrar jalan di spawn_blocking).
+pub struct SystemRegistrarClock;
+
+impl RegistrarClock for SystemRegistrarClock {
+    fn sleep(&mut self, d: std::time::Duration) {
+        std::thread::sleep(d);
+    }
+}
