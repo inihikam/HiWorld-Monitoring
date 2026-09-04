@@ -63,10 +63,8 @@ for i in $(seq 1 20); do
   sleep 0.5
 done
 
-echo "==> register agent ke collector (sisi agent otomatis menyusul di task lanjutan)"
-curl -fsS -X POST -H 'Content-Type: application/json' \
-  -d '{"host_id":"web-smoke","agent_url":"http://127.0.0.1:'$PORT_AGENT'","token":"smoke-prov-token"}' \
-  "http://127.0.0.1:$PORT_COLLECTOR/api/agents/register" > /dev/null
+# NOTE (SR5): TIDAK ada curl register manual — agent self-register sendiri
+# dari [collector] config (Q1). Jika host tidak muncul = bug agent.
 
 echo "==> tunggu poll (max 15s)"
 for i in $(seq 1 30); do
@@ -78,8 +76,8 @@ for i in $(seq 1 30); do
       "http://127.0.0.1:$PORT_COLLECTOR/api/login" 2>/dev/null | grep -i '^set-cookie' | cut -d' ' -f2 | cut -d';' -f1 || true)
     if [ -n "${COOKIE:-}" ]; then
       HOSTS=$(curl -fsS -H "Cookie: $COOKIE" "http://127.0.0.1:$PORT_COLLECTOR/api/hosts" 2>/dev/null || echo "[]")
-      if echo "$HOSTS" | grep -q "web-smoke"; then
-        echo "==> OK: host web-smoke terdaftar & terlihat di /api/hosts"
+      if echo "$HOSTS" | grep -q '"host_id"'; then
+        echo "==> OK: agent self-register BERHASIL — host muncul di /api/hosts"
         echo "    hosts = $HOSTS"
         exit 0
       fi
