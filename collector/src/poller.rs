@@ -214,12 +214,29 @@ impl Poller {
     }
 
     fn mark_success(&mut self, host_id: &str, ts: u64) {
-        let st = self.statuses.entry(host_id.to_string()).or_default();
-        st.online = true;
-        st.consecutive_failures = 0;
-        st.last_ok_ms = Some(ts);
-        st.last_error = None;
+        let was_offline = {
+            let st = self.statuses.entry(host_id.to_string()).or_default();
+            let was_offline = !st.online && st.consecutive_failures > 0;
+            st.online = true;
+            st.consecutive_failures = 0;
+            st.last_ok_ms = Some(ts);
+            st.last_error = None;
+            was_offline
+        };
         self.last_seen.insert(host_id.to_string(), ts);
+
+        // Q-SD1: transisi down→up → event agent_up (info) — transparan
+        if was_offline {
+            let _ = self.store.insert_event(
+                host_id,
+                "agent_up",
+                "info",
+                host_id,
+                &serde_json::json!({
+                    "timestamp_ms": ts,
+                }),
+            );
+        }
     }
 
     fn mark_failure(&mut self, host_id: &str, err: &str) {
