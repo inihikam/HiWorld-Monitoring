@@ -21,10 +21,10 @@ out-of-the-box).
 ## Status
 
 **Fondasi arsitektur: SELESAI & TERVERIFIKASI** (2026-09-03)
-- 82 test hijau, clippy `-D warnings` bersih
-- 15/17 acceptance criteria ✅, 1 Should ditunda eksplisit, 0 gagal
-- Smoke test e2e verified (binary musl statis: agent 1.5MB, collector 9.1MB)
-- Retrospective: `docs/plan/architecture-retrospective.md` (lokal)
+**Agent self-register: SELESAI & VERIFIED e2e** (2026-09-03)
+- 102 test hijau, clippy `-D warnings` bersih
+- Smoke e2e: agent mendaftar sendiri ke collector, host muncul otomatis
+- Retrospective: `docs/plan/*-retrospective.md` (lokal)
 
 ## Build
 
@@ -144,7 +144,7 @@ scripts/    smoke.sh + systemd units
 ## Roadmap
 
 - [x] Fondasi arsitektur (agent + collector + store + API) — 82 test, e2e verified
-- [ ] Agent self-register (dari `[collector]` config)
+- [x] Agent self-register (dari `[collector]` config) — verified e2e
 - [ ] Spike detection + event log (attribution: proses apa penyebab spike)
 - [ ] Telegram alert
 - [ ] Web dashboard (Svelte 5 + M3 + uPlot + WebSocket)
