@@ -1,25 +1,58 @@
 <script>
   /**
-   * App shell (WD7, WD-AC-008/009): layout adaptif + hash routing.
-   * ≥900px → NavRail kiri; <900px → NavBottom. Login page tanpa nav.
+   * App shell (WD7+WD8+WD9): adaptif + auth guard + WS realtime.
    */
   import TopBar from './lib/m3/TopBar.svelte'
   import NavRail from './lib/m3/NavRail.svelte'
   import NavBottom from './lib/m3/NavBottom.svelte'
   import Badge from './lib/m3/Badge.svelte'
+  import LoginPage from './pages/LoginPage.svelte'
   import { i18n, t, setLocale, availableLocales } from './lib/i18n.svelte.js'
   import { theme, toggleTheme, applyTheme } from './lib/theme.svelte.js'
   import { route as routeState, navigate } from './lib/router.svelte.js'
+  import { checkAuth, setUnauthorizedHandler, logout } from './lib/api.js'
+  import { createWsClient } from './lib/ws.js'
+  import { hostsStore, applyHello, applySnapshot, applyStatus } from './lib/stores/hosts.svelte.js'
 
   const route = $derived(routeState.path)
   let isMobile = $state(window.innerWidth < 900)
-  let authed = $state(true) // probe auth menyusul WD8; scaffold asumsi true
-  let eventsBadge = $state(0) // WE4 mengisi ini
+  let authed = $state(null) // null = probing
+  let wsState = $state('idle')
+  let eventsBadge = $state(0) // WE4 mengisi
 
   applyTheme()
 
+  setUnauthorizedHandler(() => {
+    authed = false
+    navigate('/login')
+  })
 
-  // breakpoint adaptif via matchMedia (bukan resize spam)
+  // WD9: WS lifecycle terikat auth
+  let ws = null
+  function startWs() {
+    ws = createWsClient({
+      onHello: (data) => applyHello(data),
+      onSnapshot: (snap) => applySnapshot(snap),
+      onEvent: () => (eventsBadge += 1),
+      onHostStatus: (st) => applyStatus(st),
+      onStateChange: (s) => (wsState = s),
+    })
+    ws.connect()
+  }
+
+  // probe sesi saat init (WD-AC-010); sukses → mulai WS
+  $effect(() => {
+    checkAuth().then((ok) => {
+      authed = ok
+      if (ok) {
+        if (!ws) startWs()
+      } else if (route !== '/login') {
+        navigate('/login')
+      }
+    })
+    return () => ws?.close()
+  })
+
   const mq = window.matchMedia('(max-width: 899px)')
   $effect(() => {
     const fn = (e) => (isMobile = e.matches)
@@ -38,67 +71,101 @@
       ?.href ?? '#/'
   )
 
-  const showChrome = $derived(authed && route !== '/login')
+  const showChrome = $derived(authed === true && route !== '/login')
+  const wsBadgeColor = $derived(
+    wsState === 'connected' ? 'success' : wsState === 'connecting' || wsState === 'reconnecting' ? 'warning' : 'error'
+  )
+  const wsLabel = $derived(
+    wsState === 'connected'
+      ? t('common.connected')
+      : wsState === 'connecting' || wsState === 'reconnecting'
+        ? t('common.reconnecting')
+        : t('common.disconnected')
+  )
+
+  async function doLogout() {
+    ws?.close()
+    await logout()
+    authed = false
+    navigate('/login')
+  }
 </script>
 
-<div class="shell" class:mobile={isMobile}>
-  {#if showChrome && !isMobile}
-    <aside class="rail">
-      <NavRail items={NAV} active={activeNav} onnavigate={navigate} />
-    </aside>
-  {/if}
-
-  <div class="content">
-    <TopBar title={t('overview.title')}>
-      <select
-        data-testid="locale-select"
-        value={i18n.locale}
-        onchange={(e) => setLocale(e.target.value)}
-        aria-label="Language"
-      >
-        {#each availableLocales() as loc}
-          <option value={loc}>{loc.toUpperCase()}</option>
-        {/each}
-      </select>
-      <button
-        data-testid="theme-toggle"
-        onclick={toggleTheme}
-        aria-label="Toggle theme"
-        title={theme.current}
-      >
-        {theme.current === 'dark' ? '☀' : '☾'}
-      </button>
-    </TopBar>
-
-    <main class="page">
-      {#if route === '/'}
-        <h1>{t('nav.overview')}</h1>
-        <p data-testid="page-overview">overview placeholder (WO3)</p>
-      {:else if route.startsWith('/host/')}
-        <h1>{t('nav.host_detail')}</h1>
-        <p data-testid="page-host">host detail placeholder (WH3): {route}</p>
-      {:else if route === '/events'}
-        <h1>{t('nav.events')}</h1>
-        <p data-testid="page-events">events placeholder (WE2)</p>
-      {:else if route === '/settings'}
-        <h1>{t('nav.settings')}</h1>
-        <p data-testid="page-settings">settings placeholder (WD8)</p>
-      {:else if route === '/login'}
-        <h1>{t('login.title')}</h1>
-        <p data-testid="page-login">login placeholder (WD8)</p>
-      {:else}
-        <h1>404</h1>
-        <p data-testid="page-404">unknown route: {route}</p>
-      {/if}
-    </main>
-
-    {#if showChrome && isMobile}
-      <NavBottom items={NAV} active={activeNav} onnavigate={navigate} />
+{#if route === '/login' || authed === false}
+  <LoginPage />
+{:else if authed === null}
+  <main class="boot" data-testid="boot-probe">
+    <p>{t('common.loading')}</p>
+  </main>
+{:else}
+  <div class="shell" class:mobile={isMobile}>
+    {#if showChrome && !isMobile}
+      <aside class="rail">
+        <NavRail items={NAV} active={activeNav} onnavigate={navigate} />
+      </aside>
     {/if}
+
+    <div class="content">
+      <TopBar title={t('overview.title')}>
+        <span class="ws-state" data-testid="ws-state" title={wsLabel}>
+          <Badge color={wsBadgeColor} pulse={wsState !== 'connected'} />
+          <span class="ws-label">{wsLabel}</span>
+        </span>
+        <select
+          data-testid="locale-select"
+          value={i18n.locale}
+          onchange={(e) => setLocale(e.target.value)}
+          aria-label="Language"
+        >
+          {#each availableLocales() as loc}
+            <option value={loc}>{loc.toUpperCase()}</option>
+          {/each}
+        </select>
+        <button
+          data-testid="theme-toggle"
+          onclick={toggleTheme}
+          aria-label="Toggle theme"
+          title={theme.current}
+        >
+          {theme.current === 'dark' ? '☀' : '☾'}
+        </button>
+        <button data-testid="logout-btn" onclick={doLogout} aria-label="Logout">⎋</button>
+      </TopBar>
+
+      <main class="page">
+        {#if route === '/'}
+          <h1>{t('nav.overview')}</h1>
+          <p data-testid="page-overview">
+            hosts di store: {Object.keys(hostsStore.byHost).length} (WO3)
+          </p>
+        {:else if route.startsWith('/host/')}
+          <h1>{t('nav.host_detail')}</h1>
+          <p data-testid="page-host">host detail placeholder (WH3): {route}</p>
+        {:else if route === '/events'}
+          <h1>{t('nav.events')}</h1>
+          <p data-testid="page-events">events placeholder (WE2)</p>
+        {:else if route === '/settings'}
+          <h1>{t('nav.settings')}</h1>
+          <p data-testid="page-settings">settings placeholder (WD9)</p>
+        {:else}
+          <h1>404</h1>
+          <p data-testid="page-404">unknown route: {route}</p>
+        {/if}
+      </main>
+
+      {#if showChrome && isMobile}
+        <NavBottom items={NAV} active={activeNav} onnavigate={navigate} />
+      {/if}
+    </div>
   </div>
-</div>
+{/if}
 
 <style>
+  .boot {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+  }
   .shell {
     display: flex;
     min-height: 100vh;
@@ -117,7 +184,14 @@
     padding: 16px 24px;
   }
   .shell.mobile .page {
-    padding: 12px 16px calc(12px + 72px); /* ruang bottom nav */
+    padding: 12px 16px calc(12px + 72px);
+  }
+  .ws-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font: var(--md-type-label);
+    color: var(--md-on-surface-variant);
   }
 
   /* TopBar controls */
