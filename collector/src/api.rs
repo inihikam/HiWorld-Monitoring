@@ -36,10 +36,59 @@ pub struct CollectorConfig {
     /// Interval poll ke agent (ms).
     #[serde(default = "default_poll_interval")]
     pub poll_interval_ms: u64,
+    /// Konfigurasi spike detection (SD1 — docs/specs/spike-detection.md §3.4).
+    #[serde(default)]
+    pub detector: DetectorConfig,
 }
 
 fn default_poll_interval() -> u64 {
     10_000
+}
+
+/// Threshold & parameter spike detection (semua bisa dioverride per deploy).
+/// Default = nilai PDD §3.4 (Default impl manual, BUKAN derive — derive
+/// menghasilkan 0.0 dan mematahkan kasus section hilang).
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
+pub struct DetectorConfig {
+    #[serde(default = "def_cpu_threshold")]
+    pub cpu_spike_threshold_percent: f64,
+    #[serde(default = "def_mem_threshold")]
+    pub mem_spike_threshold_percent: f64,
+    #[serde(default = "def_disk_threshold")]
+    pub disk_full_threshold_percent: f64,
+    #[serde(default = "def_baseline_window")]
+    pub baseline_window_min: u32,
+    #[serde(default = "def_min_samples")]
+    pub min_samples_for_baseline: u32,
+}
+
+fn def_cpu_threshold() -> f64 {
+    85.0
+}
+fn def_mem_threshold() -> f64 {
+    10.0
+}
+fn def_disk_threshold() -> f64 {
+    90.0
+}
+fn def_baseline_window() -> u32 {
+    30
+}
+fn def_min_samples() -> u32 {
+    3
+}
+
+impl Default for DetectorConfig {
+    fn default() -> Self {
+        Self {
+            cpu_spike_threshold_percent: def_cpu_threshold(),
+            mem_spike_threshold_percent: def_mem_threshold(),
+            disk_full_threshold_percent: def_disk_threshold(),
+            baseline_window_min: def_baseline_window(),
+            min_samples_for_baseline: def_min_samples(),
+        }
+    }
 }
 
 pub struct AppState {

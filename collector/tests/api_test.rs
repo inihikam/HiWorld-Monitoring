@@ -19,6 +19,7 @@ fn test_config() -> CollectorConfig {
         db_path: ":memory:".into(),
         agent_token: "agent-secret".into(),
         poll_interval_ms: 10_000,
+        detector: Default::default(),
     }
 }
 
