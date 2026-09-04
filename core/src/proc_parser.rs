@@ -144,6 +144,10 @@ pub enum ParseError {
     Format(String),
 }
 
+/// Alias publik agar consumer (agent/collector) tidak menyebut "ParseError"
+/// untuk error yang juga mencakup I/O.
+pub type ProcError = ParseError;
+
 // ---------- struct hasil parse ----------
 
 #[derive(Debug, Clone, PartialEq)]
