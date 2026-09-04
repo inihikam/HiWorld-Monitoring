@@ -1,0 +1,35 @@
+[Unit]
+Description=hiworld-monitoring agent (reads /proc, serves snapshots)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hiworld-agent --config /etc/hiworld/agent.toml
+Restart=always
+RestartSec=5
+User=hiworld
+Group=hiworld
+
+# ---- Hardening ----
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+PrivateTmp=yes
+PrivateDevices=yes
+# agent membaca /proc (read-only) & /etc/passwd utk resolve uid → username
+ReadOnlyPaths=/proc
+ReadWritePaths=
+
+[Install]
+WantedBy=multi-user.target

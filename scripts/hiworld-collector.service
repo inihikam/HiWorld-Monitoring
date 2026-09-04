@@ -1,0 +1,35 @@
+[Unit]
+Description=hiworld-monitoring collector (polls agents, stores metrics, serves UI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hiworld-collector --config /etc/hiworld/collector.toml
+Restart=always
+RestartSec=5
+User=hiworld
+Group=hiworld
+WorkingDirectory=/var/lib/hiworld
+
+# ---- Hardening ----
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+PrivateTmp=yes
+PrivateDevices=yes
+# collector butuh TULIS untuk SQLite DB di /var/lib/hiworld
+ReadWritePaths=/var/lib/hiworld
+
+[Install]
+WantedBy=multi-user.target
