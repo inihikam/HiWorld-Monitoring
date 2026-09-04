@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$WORK"' EXIT
 
-BIN="$ROOT/target/release"
+
 PORT_COLLECTOR=18080
 PORT_AGENT=19100
 
@@ -43,6 +43,8 @@ db_path = "$WORK/smoke.db"
 agent_token = "smoke-agent-token"
 poll_interval_ms = 1000
 EOF
+
+BIN="${HIWORLD_BIN:-$ROOT/target/release}"
 
 echo "==> start collector"
 "$BIN/hiworld-collector" --config "$WORK/collector.toml" &
