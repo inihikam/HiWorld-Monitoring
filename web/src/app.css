@@ -1,14 +1,129 @@
-/* M3 placeholder tokens — lengkap (dark+light) di WD4. */
-:root {
+/* ============================================================
+   Material Design 3 tokens — hiworld dashboard (WD4, WD-AC-004..007)
+   Dark default; light via [data-theme="light"]; persisted by theme.svelte.js
+   Source roles: M3 color system (baseline, purple-primary variant)
+   ============================================================ */
+
+:root,
+:root[data-theme='dark'] {
+  /* color roles — dark */
   --md-primary: #a8c7fa;
   --md-on-primary: #062e6f;
+  --md-primary-container: #0842a0;
+  --md-on-primary-container: #d3e3ff;
+  --md-secondary: #bfc8dc;
+  --md-on-secondary: #293241;
+  --md-tertiary: #dfbbdd;
+  --md-on-tertiary: #402841;
+  --md-error: #ffb4ab;
+  --md-on-error: #690005;
+  --md-error-container: #93000a;
+  --md-on-error-container: #ffdad6;
+  --md-success: #7ddb8a;
+  --md-on-success: #003917;
+  --md-warning: #ffc46b;
+  --md-on-warning: #422c00;
+
   --md-surface: #101418;
+  --md-surface-dim: #101418;
+  --md-surface-bright: #363a3f;
+  --md-surface-container-lowest: #0b0e12;
+  --md-surface-container-low: #181c20;
+  --md-surface-container: #1c2024;
+  --md-surface-container-high: #262a2e;
+  --md-surface-container-highest: #313539;
   --md-on-surface: #e1e2e8;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --md-on-surface-variant: #c3c7cf;
+  --md-outline: #8d9199;
+  --md-outline-variant: #43474e;
+  --md-inverse-surface: #e1e2e8;
+  --md-inverse-on-surface: #2d3033;
+
+  /* elevation shadows */
+  --md-elev-1: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --md-elev-2: 0 2px 6px rgba(0, 0, 0, 0.5), 0 1px 4px rgba(0, 0, 0, 0.4);
+  --md-elev-3: 0 4px 12px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+
+  /* state layer opacities (M3 spec) */
+  --md-state-hover: 0.08;
+  --md-state-press: 0.12;
+  --md-state-focus: 0.1;
+
+  /* shape */
+  --md-radius-xs: 4px;
+  --md-radius-sm: 8px;
+  --md-radius-md: 12px;
+  --md-radius-lg: 16px;
+  --md-radius-xl: 28px;
+  --md-radius-full: 999px;
+
+  /* motion */
+  --md-dur-short: 150ms;
+  --md-dur-med: 300ms;
+  --md-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* typography scale (M3 type ramp) */
+  --md-font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --md-font-mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', monospace;
+  --md-type-display: 600 28px/1.2 var(--md-font);
+  --md-type-headline: 600 22px/1.3 var(--md-font);
+  --md-type-title: 600 16px/1.4 var(--md-font);
+  --md-type-body: 400 14px/1.5 var(--md-font);
+  --md-type-label: 500 12px/1.4 var(--md-font);
+}
+
+:root[data-theme='light'] {
+  --md-primary: #0b57d0;
+  --md-on-primary: #ffffff;
+  --md-primary-container: #d3e3ff;
+  --md-on-primary-container: #041e49;
+  --md-secondary: #565e71;
+  --md-on-secondary: #ffffff;
+  --md-tertiary: #715573;
+  --md-on-tertiary: #ffffff;
+  --md-error: #b3261e;
+  --md-on-error: #ffffff;
+  --md-error-container: #f9dedc;
+  --md-on-error-container: #410e0b;
+  --md-success: #1b6e2d;
+  --md-on-success: #ffffff;
+  --md-warning: #8a5b00;
+  --md-on-warning: #ffffff;
+
+  --md-surface: #f8f9ff;
+  --md-surface-dim: #d8dae0;
+  --md-surface-bright: #f8f9ff;
+  --md-surface-container-lowest: #ffffff;
+  --md-surface-container-low: #f2f3fa;
+  --md-surface-container: #eceef4;
+  --md-surface-container-high: #e6e8ee;
+  --md-surface-container-highest: #e1e2e8;
+  --md-on-surface: #1a1b21;
+  --md-on-surface-variant: #44474e;
+  --md-outline: #74777f;
+  --md-outline-variant: #c4c6d0;
+  --md-inverse-surface: #2f3036;
+  --md-inverse-on-surface: #f1f0f4;
+
+  --md-elev-1: 0 1px 3px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.1);
+  --md-elev-2: 0 2px 6px rgba(0, 0, 0, 0.15), 0 1px 4px rgba(0, 0, 0, 0.1);
+  --md-elev-3: 0 4px 12px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+/* base */
+html {
+  color-scheme: dark;
+}
+html[data-theme='light'] {
+  color-scheme: light;
 }
 
 body {
   margin: 0;
   background: var(--md-surface);
   color: var(--md-on-surface);
+  font: var(--md-type-body);
+  transition:
+    background-color var(--md-dur-med) var(--md-ease),
+    color var(--md-dur-med) var(--md-ease);
 }
