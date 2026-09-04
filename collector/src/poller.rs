@@ -39,6 +39,9 @@ pub struct Poller {
     detector_store: Option<Store>,
     /// Broadcast realtime (WS1) — None = tanpa broadcast (kompatibilitas).
     hub: Option<crate::hub::BroadcastHub>,
+    /// Telegram alert (TA5) — None = tanpa notifikasi (zero-config).
+    /// Dipanggil setelah insert_event; blocking aman (poller di spawn_blocking).
+    telegram: Option<crate::telegram::bridge::AsyncAlertBridge>,
 }
 
 impl Poller {
@@ -59,6 +62,7 @@ impl Poller {
             detector: None,
             detector_store: None,
             hub: None,
+            telegram: None,
         }
     }
 
@@ -71,6 +75,21 @@ impl Poller {
         detector_store: Store,
     ) -> Self {
         Self::with_detector_hub(store, agent_token, interval, cfg, detector_store, None)
+    }
+
+    /// Poller + detector + Telegram bridge (TA5).
+    pub fn with_detector_and_bridge(
+        store: Store,
+        agent_token: String,
+        interval: Duration,
+        cfg: crate::api::DetectorConfig,
+        detector_store: Store,
+        telegram: Option<crate::telegram::bridge::AsyncAlertBridge>,
+    ) -> Self {
+        let mut p =
+            Self::with_detector_hub(store, agent_token, interval, cfg, detector_store, None);
+        p.telegram = telegram;
+        p
     }
 
     /// Poller lengkap: detector + broadcast hub (WS2).
@@ -114,6 +133,7 @@ impl Poller {
             detector: Some(detector),
             detector_store: Some(detector_store),
             hub,
+            telegram: None,
         }
     }
 
@@ -138,12 +158,31 @@ impl Poller {
         Ok(())
     }
 
+    /// Poll N putaran dalam spawn_blocking — dipakai test & alat ukur.
+    /// Blocking HTTP (Telegram) wajib context blocking (ADR TA-2).
+    pub async fn poll_blocking_times(mut self, n: usize) -> Result<(), String> {
+        tokio::task::spawn_blocking(move || {
+            crate::telegram::client::init_shared_http();
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                for _ in 0..n {
+                    self.poll_once_all().await?;
+                }
+                Ok::<(), String>(())
+            })
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+
     /// Loop produksi: poll tiap interval selamanya.
     /// Poller berisi Store (rusqlite, !Send) → seluruh struct dipindah ke
     /// thread blocking khusus (bukan tokio::spawn).
     pub async fn run_forever(mut self) {
         let interval = self.interval;
         tokio::task::spawn_blocking(move || {
+            // TA: reqwest::blocking client harus dibuat di thread blocking
+            crate::telegram::client::init_shared_http();
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async move {
                 let mut ticker = tokio::time::interval(interval);
@@ -167,23 +206,33 @@ impl Poller {
             .await;
 
         match res {
-            Ok(resp) if resp.status().is_success() => match resp.json::<Snapshot>().await {
-                Ok(snap) => {
-                    let snap_ts = snap.timestamp_ms;
-                    let since = self.last_seen.get(host_id).copied();
-                    if let Err(e) = self
-                        .store_snapshot_and_backfill(host_id, agent_url, snap, since)
-                        .await
-                    {
-                        self.mark_failure(host_id, &format!("store/backfill: {e}"));
+            Ok(resp) => {
+                let resp = match resp.error_for_status() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        self.mark_failure(host_id, &format!("http: {e}"));
                         return;
                     }
-                    self.mark_success(host_id, snap_ts);
+                };
+                match resp.json::<Snapshot>().await {
+                    Ok(snap) => {
+                        let snap_ts = snap.timestamp_ms;
+                        let since = self.last_seen.get(host_id).copied();
+                        if let Err(e) = self
+                            .store_snapshot_and_backfill(host_id, agent_url, snap, since)
+                            .await
+                        {
+                            self.mark_failure(host_id, &format!("store/backfill: {e}"));
+                            return;
+                        }
+                        self.mark_success(host_id, snap_ts);
+                    }
+                    Err(e) => self.mark_failure(host_id, &format!("decode: {e}")),
                 }
-                Err(e) => self.mark_failure(host_id, &format!("decode: {e}")),
-            },
-            Ok(resp) => self.mark_failure(host_id, &format!("HTTP {}", resp.status())),
-            Err(e) => self.mark_failure(host_id, &format!("connect: {e}")),
+            }
+            Err(e) => {
+                self.mark_failure(host_id, &format!("connect: {e}"));
+            }
         }
     }
 
@@ -218,7 +267,8 @@ impl Poller {
                 store: detector_store,
                 window_min: detector.mem_window_min(),
             };
-            for ev in detector.evaluate(&snap, &mut self.store, &baseline) {
+            let evs = detector.evaluate(&snap, &mut self.store, &baseline);
+            for ev in evs {
                 self.store
                     .insert_event(&ev.host_id, &ev.kind, &ev.severity, &ev.subject, &ev.detail)
                     .map_err(|e| e.to_string())?;
@@ -231,6 +281,35 @@ impl Poller {
                         subject: ev.subject.clone(),
                         detail: ev.detail.clone(),
                     });
+                }
+                // TA5: Telegram alert (best-effort — hasil diabaikan, TA-3)
+                if let Some(bridge) = &mut self.telegram {
+                    let sev = match ev.severity.as_str() {
+                        "critical" => crate::telegram::Severity::Critical,
+                        "info" => crate::telegram::Severity::Info,
+                        _ => crate::telegram::Severity::Warning,
+                    };
+                    let time_str = {
+                        let secs = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        let h = (secs / 3600) % 24;
+                        let m = (secs / 60) % 60;
+                        let s2 = secs % 60;
+                        format!("{h:02}:{m:02}:{s2:02}")
+                    };
+                    let text = crate::telegram::format::render_alert(
+                        sev,
+                        &ev.kind,
+                        &ev.host_id,
+                        &ev.subject,
+                        &ev.detail,
+                        &time_str,
+                    );
+                    bridge
+                        .handle_async(sev, &ev.kind, &ev.host_id, &ev.subject, &text)
+                        .await;
                 }
             }
         }

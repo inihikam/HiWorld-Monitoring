@@ -41,6 +41,82 @@ pub struct AlertBridge<H: TelegramHttp, C: Clock> {
     sent_at: VecDeque<u64>,
 }
 
+/// Bridge versi async untuk produksi (poller async, ADR TA-2b).
+pub struct AsyncAlertBridge {
+    cfg: TelegramConfig,
+    client: crate::telegram::client::TelegramClient,
+    sent_at: VecDeque<u64>,
+}
+
+impl AsyncAlertBridge {
+    pub fn new(cfg: TelegramConfig, client: crate::telegram::client::TelegramClient) -> Self {
+        Self {
+            cfg,
+            client,
+            sent_at: VecDeque::new(),
+        }
+    }
+
+    fn admit(&mut self, severity: Severity, kind: &str, host: &str) -> bool {
+        if severity < self.cfg.min_severity {
+            return false;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let window_start = now.saturating_sub(60_000);
+        while let Some(&front) = self.sent_at.front() {
+            if front < window_start {
+                self.sent_at.pop_front();
+            } else {
+                break;
+            }
+        }
+        if self.sent_at.len() as u32 >= self.cfg.max_per_minute {
+            tracing::warn!("telegram rate limit: drop event {kind}/{host}");
+            return false;
+        }
+        self.sent_at.push_back(now);
+        true
+    }
+
+    pub async fn handle_async(
+        &mut self,
+        severity: Severity,
+        kind: &str,
+        host: &str,
+        _subject: &str,
+        text: &str,
+    ) -> bool {
+        if !self.admit(severity, kind, host) {
+            return false;
+        }
+        for attempt in 0usize.. {
+            match self
+                .client
+                .send_message_async(&self.cfg.chat_id, text)
+                .await
+            {
+                Ok(()) => return true,
+                Err(e) => {
+                    tracing::warn!("telegram send gagal (percobaan {attempt}): {e}");
+                    match crate::telegram::bridge::BACKOFF_MS.get(attempt) {
+                        Some(&backoff) => {
+                            tokio::time::sleep(std::time::Duration::from_millis(backoff)).await
+                        }
+                        None => {
+                            tracing::error!("telegram give up setelah {} percobaan", attempt + 1);
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+}
+
 impl<H: TelegramHttp, C: Clock> AlertBridge<H, C> {
     pub fn new(cfg: TelegramConfig, http: H, clock: C) -> Self {
         Self {
@@ -51,8 +127,7 @@ impl<H: TelegramHttp, C: Clock> AlertBridge<H, C> {
         }
     }
 
-    /// Handle satu event. Return true bila terkirim (atau di-drop by design?
-    /// false = tidak terkirim: filter / rate limit / gagal permanen).
+    /// Handle sync (unit test + konteks blocking). Return true bila terkirim.
     pub fn handle(
         &mut self,
         severity: Severity,
