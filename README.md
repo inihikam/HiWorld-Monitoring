@@ -148,7 +148,9 @@ scripts/    smoke.sh + systemd units
 - [x] Fondasi arsitektur (agent + collector + store + API) — 82 test, e2e verified
 - [x] Agent self-register (dari `[collector]` config) — verified e2e
 - [x] Spike detection + event log (attribution: proses apa penyebab spike)
-- [ ] Telegram alert
+- [x] Telegram alert: spike & status agent kirim notifikasi Bot API
+  (severity filter, rate limit 20/menit, retry 3x backoff, plain text) —
+  config `[telegram]` di collector
 - [x] Web dashboard v1 KOMPLET: overview realtime (grid host + ring summary,
   host bermasalah auto-di-atas), host detail (uPlot time-series + tabel proses
   attribution), events timeline (filter + accordion + deep link), M3 dark/
