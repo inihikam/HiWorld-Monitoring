@@ -336,6 +336,92 @@ impl Store {
         };
         Ok(rows.flatten().collect())
     }
+
+    // ---------- detector support (Task SD5) ----------
+
+    /// Avg RSS (bytes) satu proses dalam window [from_ms, to_ms] + jumlah sample.
+    /// Membaca processes_json per snapshot (JSON di-parsing di Rust — kompatibel
+    /// semua build SQLite). Sample dengan rss 0 dikecualikan (anti div-zero).
+    /// None = proses tidak ditemukan di window.
+    pub fn avg_rss_baseline(
+        &self,
+        host_id: &str,
+        pid: i32,
+        from_ms: u64,
+        to_ms: u64,
+    ) -> Result<Option<(u64, u32)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT processes_json FROM metrics_raw
+             WHERE host_id = ?1 AND timestamp_ms >= ?2 AND timestamp_ms <= ?3
+             ORDER BY timestamp_ms",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![host_id, from_ms as i64, to_ms as i64],
+            |r| r.get::<_, String>(0),
+        )?;
+
+        let mut total: u64 = 0;
+        let mut count: u32 = 0;
+        for row in rows {
+            let json = row?;
+            let procs: Vec<hiworld_core::models::ProcessInfo> =
+                serde_json::from_str(&json).map_err(StoreError::Serde)?;
+            if let Some(p) = procs.iter().find(|p| p.pid == pid) {
+                if p.mem_rss_bytes > 0 {
+                    total += p.mem_rss_bytes;
+                    count += 1;
+                }
+            }
+        }
+        if count == 0 {
+            return Ok(None);
+        }
+        Ok(Some((total / count as u64, count)))
+    }
+
+    pub fn get_active_event(&self, key: &str) -> Result<Option<crate::detector::ActiveEvent>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key, first_seen_ms, last_seen_ms FROM active_events WHERE key = ?1")?;
+        let mut rows = stmt.query_map([key], |r| {
+            Ok(crate::detector::ActiveEvent {
+                key: r.get(0)?,
+                first_seen_ms: r.get::<_, i64>(1)? as u64,
+                last_seen_ms: r.get::<_, i64>(2)? as u64,
+            })
+        })?;
+        Ok(rows.next().transpose()?)
+    }
+
+    pub fn insert_active_event(&self, key: &str, now_ms: u64) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO active_events (key, first_seen_ms, last_seen_ms)
+             VALUES (?1, ?2, ?2)",
+            rusqlite::params![key, now_ms as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn touch_active_event(&self, key: &str, now_ms: u64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE active_events SET last_seen_ms = ?2 WHERE key = ?1",
+            rusqlite::params![key, now_ms as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_active_event(&self, key: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM active_events WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
+    pub fn gc_active_events(&self, older_than_ms: u64) -> Result<usize> {
+        Ok(self.conn.execute(
+            "DELETE FROM active_events WHERE last_seen_ms < ?1",
+            [older_than_ms as i64],
+        )?)
+    }
 }
 
 const SCHEMA_V1: &str = r#"
@@ -387,6 +473,13 @@ CREATE TABLE IF NOT EXISTS metrics_rollup (
 );
 CREATE INDEX IF NOT EXISTS idx_rollup_host_ts ON metrics_rollup(host_id, bucket_start_ms);
 
+CREATE TABLE IF NOT EXISTS active_events (
+    key TEXT PRIMARY KEY,
+    first_seen_ms INTEGER NOT NULL,
+    last_seen_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_active_events_last ON active_events(last_seen_ms);
+
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     host_id TEXT NOT NULL,
@@ -398,5 +491,65 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_host_ts ON events(host_id, timestamp_ms);
 
-INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '1');
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '2');
 "#;
+
+// ---------- wiring trait detector (Opsi B) ----------
+
+impl crate::detector::ActiveEventStore for &Store {
+    fn get(&self, key: &str) -> Option<crate::detector::ActiveEvent> {
+        (*self).get_active_event(key).ok().flatten()
+    }
+    fn insert(&self, key: &str, now_ms: u64) {
+        let _ = (*self).insert_active_event(key, now_ms);
+    }
+    fn touch(&self, key: &str, now_ms: u64) {
+        let _ = (*self).touch_active_event(key, now_ms);
+    }
+    fn delete(&self, key: &str) {
+        let _ = (*self).delete_active_event(key);
+    }
+    fn gc(&self, older_than_ms: u64) {
+        let _ = (*self).gc_active_events(older_than_ms);
+    }
+}
+
+impl crate::detector::ActiveEventStore for Store {
+    fn get(&self, key: &str) -> Option<crate::detector::ActiveEvent> {
+        self.get_active_event(key).ok().flatten()
+    }
+    fn insert(&self, key: &str, now_ms: u64) {
+        let _ = self.insert_active_event(key, now_ms);
+    }
+    fn touch(&self, key: &str, now_ms: u64) {
+        let _ = self.touch_active_event(key, now_ms);
+    }
+    fn delete(&self, key: &str) {
+        let _ = self.delete_active_event(key);
+    }
+    fn gc(&self, older_than_ms: u64) {
+        let _ = self.gc_active_events(older_than_ms);
+    }
+}
+
+/// BaselineFetcher produksi: baca langsung dari metrics_raw.
+/// Memegang referensi ke Store (bukan clone — rusqlite !Sync, dipakai
+/// di konteks yang sama dengan poller).
+pub struct StoreBaseline<'a> {
+    pub store: &'a Store,
+    pub window_min: u32,
+}
+
+impl crate::detector::BaselineFetcher for StoreBaseline<'_> {
+    fn avg_rss(&self, host_id: &str, pid: i32) -> Option<(u64, u32)> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let from = now.saturating_sub(self.window_min as u64 * 60_000);
+        self.store
+            .avg_rss_baseline(host_id, pid, from, now)
+            .ok()
+            .flatten()
+    }
+}
