@@ -8,3 +8,7 @@ description = "Shared models and /proc parsers for hiworld-monitoring"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+# disiapkan untuk property test di Task B3 (ARCH-AC-012)
+proptest = "1"
