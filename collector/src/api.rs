@@ -141,6 +141,12 @@ fn now_ms() -> u64 {
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
+    router_with_static(state, &None)
+}
+
+/// Router dengan static serving opsional (WD2): main memanggil versi ini
+/// bila static_dir dikonfigurasi.
+pub fn router_with_static(state: Arc<AppState>, static_dir: &Option<String>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/agents/register", post(register))
@@ -151,7 +157,41 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/history", get(history))
         .route("/api/events", get(events))
         .route("/ws", get(crate::ws::ws_handler))
+        .nest("/api", Router::new().fallback(api_not_found))
+        .fallback_service(serve_dashboard(static_dir))
         .with_state(state)
+}
+
+/// Static serving + SPA fallback (Task WD2, WD-AC-002/003).
+/// Dipanggil main: router(state).fallback_service(serve_dashboard(&cfg.static_dir))
+/// - Some(dir)  → ServeDir dengan fallback index.html (SPA)
+/// - None       → 404 (tanpa panic)
+pub fn serve_dashboard(
+    static_dir: &Option<String>,
+) -> tower_http::services::ServeDir<tower_http::services::ServeFile> {
+    match static_dir {
+        Some(dir) => {
+            let index =
+                tower_http::services::ServeFile::new(std::path::Path::new(dir).join("index.html"));
+            tower_http::services::ServeDir::new(dir).fallback(index)
+        }
+        None => {
+            // dir tak ada: ServeDir ke path tak valid → semua 404, tanpa panic
+            tower_http::services::ServeDir::new("/nonexistent-wd2").fallback(
+                tower_http::services::ServeFile::new("/nonexistent-wd2/index.html"),
+            )
+        }
+    }
+}
+
+/// 404 JSON untuk path /api/* tak dikenal (WD2): API tidak boleh jatuh ke
+/// SPA fallback (index.html = 200 palsu).
+pub async fn api_not_found() -> axum::response::Response {
+    axum::response::Response::builder()
+        .status(axum::http::StatusCode::NOT_FOUND)
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(r#"{"error":"not found"}"#))
+        .unwrap()
 }
 
 // ---------- health ----------

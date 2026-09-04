@@ -11,6 +11,7 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 clap.workspace = true
+tower-http = { version = "0.6", features = ["fs"] }
 axum = { version = "0.8", features = ["macros", "ws"] }
 thiserror = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
