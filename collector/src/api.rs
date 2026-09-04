@@ -99,6 +99,8 @@ pub struct AppState {
     pub started_at_ms: u64,
     /// sesi aktif: token acak → username
     pub sessions: Mutex<HashMap<String, String>>,
+    /// Broadcast realtime (WS1/WS3) — klien dashboard subscribe di sini.
+    pub hub: crate::hub::BroadcastHub,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -122,6 +124,7 @@ impl AppState {
             auth: Mutex::new(auth),
             started_at_ms: now_ms(),
             sessions: Mutex::new(HashMap::new()),
+            hub: crate::hub::BroadcastHub::new(1024),
         }))
     }
 }
@@ -142,6 +145,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/hosts", get(list_hosts))
         .route("/api/history", get(history))
         .route("/api/events", get(events))
+        .route("/ws", get(crate::ws::ws_handler))
         .with_state(state)
 }
 

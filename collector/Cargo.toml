@@ -11,14 +11,17 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 clap.workspace = true
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
 thiserror = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 bcrypt = "0.17"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tracing = "0.1"
+bytes = "1"
 tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
 wiremock = "0.6"
 tower = { version = "0.5", features = ["util"] }
