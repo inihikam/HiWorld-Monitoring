@@ -49,7 +49,7 @@ describe('App shell (WD7+WD8)', () => {
     setSize(1200)
     render(App)
     await vi.waitFor(() => {
-      expect(screen.getByTestId('page-overview')).toBeInTheDocument()
+      expect(screen.getByTestId('overview-page')).toBeInTheDocument()
     })
     at('#/events')
     await vi.waitFor(() => {

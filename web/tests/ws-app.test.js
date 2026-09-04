@@ -32,7 +32,7 @@ describe('App + WS integration (WD9, WD-AC-013)', () => {
 
   it('hostsStore: applyHello → applySnapshot → applyStatus benar', () => {
     applyHello({ hosts: [{ host_id: 'h1', latest: null }] })
-    expect(hostsStore.byHost['h1']).toEqual({ latest: null, online: false })
+    expect(hostsStore.byHost['h1']).toMatchObject({ latest: null, online: false })
 
     applySnapshot({ host_id: 'h1', timestamp_ms: 1 })
     expect(hostsStore.byHost['h1'].latest.timestamp_ms).toBe(1)

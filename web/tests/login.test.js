@@ -68,7 +68,7 @@ describe('App auth guard (WD-AC-010/011)', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 200, ok: true }))
     render(App)
     await waitFor(() => {
-      expect(screen.getByTestId('page-overview')).toBeInTheDocument()
+      expect(screen.getByTestId('overview-page')).toBeInTheDocument()
     })
   })
 })

@@ -7,6 +7,7 @@
   import NavBottom from './lib/m3/NavBottom.svelte'
   import Badge from './lib/m3/Badge.svelte'
   import LoginPage from './pages/LoginPage.svelte'
+  import OverviewPage from './pages/OverviewPage.svelte'
   import { i18n, t, setLocale, availableLocales } from './lib/i18n.svelte.js'
   import { theme, toggleTheme, applyTheme } from './lib/theme.svelte.js'
   import { route as routeState, navigate } from './lib/router.svelte.js'
@@ -135,9 +136,7 @@
       <main class="page">
         {#if route === '/'}
           <h1>{t('nav.overview')}</h1>
-          <p data-testid="page-overview">
-            hosts di store: {Object.keys(hostsStore.byHost).length} (WO3)
-          </p>
+          <OverviewPage />
         {:else if route.startsWith('/host/')}
           <h1>{t('nav.host_detail')}</h1>
           <p data-testid="page-host">host detail placeholder (WH3): {route}</p>
