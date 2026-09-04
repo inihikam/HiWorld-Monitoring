@@ -22,8 +22,9 @@ out-of-the-box).
 
 **Fondasi arsitektur: SELESAI & TERVERIFIKASI** (2026-09-03)
 **Agent self-register: SELESAI & VERIFIED e2e** (2026-09-03)
-- 102 test hijau, clippy `-D warnings` bersih
+- 139 test hijau, clippy `-D warnings` bersih
 - Smoke e2e: agent mendaftar sendiri ke collector, host muncul otomatis
+- Spike detection aktif: CPU/mem/disk, dedup persisten, timeline agent up/down
 - Retrospective: `docs/plan/*-retrospective.md` (lokal)
 
 ## Build
@@ -145,7 +146,7 @@ scripts/    smoke.sh + systemd units
 
 - [x] Fondasi arsitektur (agent + collector + store + API) — 82 test, e2e verified
 - [x] Agent self-register (dari `[collector]` config) — verified e2e
-- [ ] Spike detection + event log (attribution: proses apa penyebab spike)
+- [x] Spike detection + event log (attribution: proses apa penyebab spike)
 - [ ] Telegram alert
 - [ ] Web dashboard (Svelte 5 + M3 + uPlot + WebSocket)
 - [ ] Turbo mode (ubah interval runtime dari UI)
