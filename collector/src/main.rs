@@ -1,8 +1,8 @@
 use clap::Parser;
 
 use hiworld_collector::api::{AppState, CollectorConfig};
-use hiworld_collector::ws;
 use hiworld_collector::store::Store;
+use hiworld_collector::ws;
 
 /// hiworld-monitoring collector: polls agents, stores metrics, serves UI.
 #[derive(Parser, Debug)]
