@@ -73,7 +73,13 @@ async fn run_cycle(with_telegram: bool, cpu: f64) -> usize {
         0
     };
 
-    let dir = std::env::temp_dir().join(format!("ta5-{}-{}", std::process::id(), 0));
+    use std::sync::atomic::{AtomicU32, Ordering as TOrd};
+    static N: AtomicU32 = AtomicU32::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "ta5-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, TOrd::SeqCst)
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let db = dir.join("c.db");
@@ -129,8 +135,15 @@ async fn run_cycle(with_telegram: bool, cpu: f64) -> usize {
         .unwrap_or(9999);
     eprintln!("TA5-DEBUG: events di DB = {n_events}");
 
-    // beri waktu spawn_blocking selesai
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // tunggu request sampai tercatat (maks 2s) — anti race
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while tokio::time::Instant::now() < deadline {
+        let received = tg.received_requests().await.map(|r| r.len()).unwrap_or(0);
+        if received >= tg_expect {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let calls = tg_expect;
     let _ = std::fs::remove_dir_all(&dir);
     calls
