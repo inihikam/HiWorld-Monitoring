@@ -46,6 +46,9 @@ pub struct HostRow {
     pub registered_at_ms: u64,
 }
 
+/// Satu event untuk API/UI.
+pub type EventRow = (String, i64, String, String, String, String);
+
 pub struct Store {
     conn: Connection,
 }
@@ -278,6 +281,60 @@ impl Store {
             [cutoff_ms as i64],
         )?;
         Ok(total)
+    }
+
+    /// Insert event (spike, agent_down, dst — dipakai poller & detector).
+    pub fn insert_event(
+        &self,
+        host_id: &str,
+        kind: &str,
+        severity: &str,
+        subject: &str,
+        detail: &serde_json::Value,
+    ) -> Result<()> {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        self.conn.execute(
+            "INSERT INTO events (host_id, timestamp_ms, kind, severity, subject, detail_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![host_id, ts, kind, severity, subject, detail.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_events(&self, host_id: Option<&str>, limit: usize) -> Result<Vec<EventRow>> {
+        let (sql, has_host) = if host_id.is_some() {
+            (
+                "SELECT host_id, timestamp_ms, kind, severity, subject, detail_json
+                 FROM events WHERE host_id = ?1 ORDER BY timestamp_ms DESC LIMIT ?2",
+                true,
+            )
+        } else {
+            (
+                "SELECT host_id, timestamp_ms, kind, severity, subject, detail_json
+                 FROM events ORDER BY timestamp_ms DESC LIMIT ?1",
+                false,
+            )
+        };
+        let mut stmt = self.conn.prepare(sql)?;
+        let map = |r: &rusqlite::Row| -> rusqlite::Result<_> {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+            ))
+        };
+        let rows = if has_host {
+            stmt.query_map(rusqlite::params![host_id.unwrap(), limit as i64], map)?
+        } else {
+            stmt.query_map([limit as i64], map)?
+        };
+        Ok(rows.flatten().collect())
     }
 }
 
