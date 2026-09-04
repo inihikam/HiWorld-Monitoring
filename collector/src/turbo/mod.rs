@@ -5,7 +5,11 @@
 //! interval normal. Per-host, best-effort (ADR TM-1..TM-6).
 
 pub mod client;
+pub mod holder;
 pub mod manager;
+
+pub use holder::TurboHolder;
+pub use manager::{Action, TurboManager};
 
 /// Config section `[turbo]` — semua default aman (TM-6).
 #[derive(Debug, Clone, serde::Deserialize)]

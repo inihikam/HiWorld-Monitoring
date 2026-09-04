@@ -42,6 +42,8 @@ pub struct Poller {
     /// Telegram alert (TA5) — None = tanpa notifikasi (zero-config).
     /// Dipanggil setelah insert_event; blocking aman (poller di spawn_blocking).
     telegram: Option<crate::telegram::bridge::AsyncAlertBridge>,
+    /// Turbo mode (TM4) — None = sampling statis (zero-config).
+    turbo: Option<crate::turbo::TurboHolder>,
 }
 
 impl Poller {
@@ -63,6 +65,7 @@ impl Poller {
             detector_store: None,
             hub: None,
             telegram: None,
+            turbo: None,
         }
     }
 
@@ -75,6 +78,24 @@ impl Poller {
         detector_store: Store,
     ) -> Self {
         Self::with_detector_hub(store, agent_token, interval, cfg, detector_store, None)
+    }
+
+    /// Poller + detector + turbo (TM4).
+    pub fn with_turbo(
+        store: Store,
+        agent_token: String,
+        interval: Duration,
+        cfg: crate::api::DetectorConfig,
+        detector_store: Store,
+        turbo: Option<crate::turbo::TurboHolder>,
+    ) -> Self {
+        let mut p =
+            Self::with_detector_hub(store, agent_token, interval, cfg, detector_store, None);
+        if let Some(t) = &mut p.turbo {
+            t.set_normal_interval(interval.as_millis() as u64);
+        }
+        p.turbo = turbo;
+        p
     }
 
     /// Poller + detector + Telegram bridge (TA5).
@@ -134,6 +155,7 @@ impl Poller {
             detector_store: Some(detector_store),
             hub,
             telegram: None,
+            turbo: None,
         }
     }
 
@@ -240,7 +262,7 @@ impl Poller {
     /// tarik backlog agent sejak last_seen dan insert (Q2: backfill v1).
     async fn store_snapshot_and_backfill(
         &mut self,
-        _host_id: &str,
+        host_id: &str,
         agent_url: &str,
         snap: Snapshot,
         since: Option<u64>,
@@ -311,7 +333,15 @@ impl Poller {
                         .handle_async(sev, &ev.kind, &ev.host_id, &ev.subject, &text)
                         .await;
                 }
+                // TM4: turbo push (spike_cpu/mem → interval turbo)
+                if let Some(turbo) = &mut self.turbo {
+                    turbo.on_event(&ev.kind, &ev.host_id).await;
+                }
             }
+        }
+        // TM4: snapshot tanpa event → sinyal normal utk turbo pop
+        if let Some(turbo) = &mut self.turbo {
+            turbo.on_snapshot(host_id).await;
         }
 
         if is_gap {
