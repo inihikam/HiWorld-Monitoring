@@ -4,6 +4,7 @@
 //! severity + rate limit → kirim via Bot API. Telegram best-effort:
 //! DB tetap source of truth (ADR TA-3).
 
+pub mod bridge;
 pub mod client;
 pub mod format;
 

@@ -9,6 +9,13 @@ pub trait TelegramHttp: Send + Sync {
     fn send_message(&self, chat_id: &str, text: &str) -> Result<(), String>;
 }
 
+/// Blanket impl: wrapper Arc otomatis TelegramHttp (pola poller store).
+impl<T: TelegramHttp> TelegramHttp for std::sync::Arc<T> {
+    fn send_message(&self, chat_id: &str, text: &str) -> Result<(), String> {
+        (**self).send_message(chat_id, text)
+    }
+}
+
 /// Client nyata: reqwest blocking (dipanggil dalam spawn_blocking — pola poller, ADR TA-2).
 pub struct TelegramClient {
     base_url: String, // default https://api.telegram.org/bot<token>
