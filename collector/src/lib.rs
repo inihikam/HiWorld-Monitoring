@@ -5,4 +5,5 @@ pub mod hub;
 pub mod poller;
 pub mod store;
 pub mod telegram;
+pub mod turbo;
 pub mod ws;
