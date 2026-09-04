@@ -145,6 +145,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/health", get(health))
         .route("/api/agents/register", post(register))
         .route("/api/login", post(login))
+        .route("/api/logout", post(logout))
         .route("/api/account/password", post(change_password))
         .route("/api/hosts", get(list_hosts))
         .route("/api/history", get(history))
@@ -241,6 +242,31 @@ async fn login(
         )],
         Json(serde_json::json!({ "login": true })),
     ))
+}
+
+/// POST /api/logout — hapus session (Task WD1, WD-AC-012). Idempotent.
+async fn logout(State(state): State<SharedState>, headers: HeaderMap) -> impl IntoResponse {
+    if let Some(cookie) = headers
+        .get(axum::http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+    {
+        let token = cookie
+            .split(';')
+            .filter_map(|c| c.trim().strip_prefix("hiworld_session="))
+            .next()
+            .map(|t| t.to_string());
+        if let Some(token) = token {
+            state.sessions.lock().unwrap().remove(&token);
+        }
+    }
+    // Set-Cookie expired supaya browser ikut membersihkan
+    (
+        [(
+            axum::http::header::SET_COOKIE,
+            "hiworld_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0".to_string(),
+        )],
+        Json(serde_json::json!({ "logout": true })),
+    )
 }
 
 #[derive(serde::Deserialize)]
