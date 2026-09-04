@@ -1,6 +1,7 @@
 use clap::Parser;
 
-use hiworld_collector::api::{router, AppState, CollectorConfig};
+use hiworld_collector::api::{AppState, CollectorConfig};
+use hiworld_collector::ws;
 use hiworld_collector::store::Store;
 
 /// hiworld-monitoring collector: polls agents, stores metrics, serves UI.
@@ -62,7 +63,9 @@ fn main() {
         );
         tokio::spawn(poller.run_forever());
 
-        let app = router(state);
+        // WD2/WD5: static serving + SPA fallback + mirror task realtime
+        ws::spawn_mirror_task(state.clone());
+        let app = hiworld_collector::api::router_with_static(state, &config.static_dir);
         let addr = format!("{}:{}", config.bind_addr, config.port);
         let listener = tokio::net::TcpListener::bind(&addr)
             .await

@@ -149,7 +149,9 @@ scripts/    smoke.sh + systemd units
 - [x] Agent self-register (dari `[collector]` config) — verified e2e
 - [x] Spike detection + event log (attribution: proses apa penyebab spike)
 - [ ] Telegram alert
-- [ ] Web dashboard (Svelte 5 + M3 + uPlot) — WS realtime sudah siap
+- [x] Web foundation: dashboard Svelte 5 (M3 dark/light, bilingual EN/ID,
+  sidebar/bottom-nav adaptif, login, WS realtime) — build: `cd web && npm
+  run deploy`, disajikan collector dari `static_dir = "collector/web-dist"`
 - [ ] Turbo mode (ubah interval runtime dari UI)
 
 ## Referensi desain
