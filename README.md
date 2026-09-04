@@ -25,6 +25,7 @@ out-of-the-box).
 - 139 test hijau, clippy `-D warnings` bersih
 - Smoke e2e: agent mendaftar sendiri ke collector, host muncul otomatis
 - Spike detection aktif: CPU/mem/disk, dedup persisten, timeline agent up/down
+- WebSocket /ws realtime: snapshot/event/host_status broadcast + hello bootstrap
 - Retrospective: `docs/plan/*-retrospective.md` (lokal)
 
 ## Build
@@ -148,7 +149,7 @@ scripts/    smoke.sh + systemd units
 - [x] Agent self-register (dari `[collector]` config) — verified e2e
 - [x] Spike detection + event log (attribution: proses apa penyebab spike)
 - [ ] Telegram alert
-- [ ] Web dashboard (Svelte 5 + M3 + uPlot + WebSocket)
+- [ ] Web dashboard (Svelte 5 + M3 + uPlot) — WS realtime sudah siap
 - [ ] Turbo mode (ubah interval runtime dari UI)
 
 ## Referensi desain
