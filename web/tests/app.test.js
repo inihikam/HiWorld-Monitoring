@@ -1,19 +1,21 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/svelte'
 import App from '../src/App.svelte'
 
-describe('App scaffold', () => {
-  it('renders title', () => {
-    render(App)
-    expect(screen.getByText('hiworld monitoring')).toBeInTheDocument()
+describe('App (shell, WD7)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    window.location.hash = '#/'
   })
 
-  it('reaches api probe state', async () => {
-    // stub fetch sebelum render
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+  it('renders shell dengan overview page', () => {
     render(App)
-    await vi.waitFor(() => {
-      expect(screen.getByTestId('scaffold-status')).toHaveTextContent('api reachable')
-    })
+    expect(screen.getByTestId('page-overview')).toBeInTheDocument()
+  })
+
+  it('theme & locale control tersedia di TopBar', () => {
+    render(App)
+    expect(screen.getByTestId('theme-toggle')).toBeInTheDocument()
+    expect(screen.getByTestId('locale-select')).toBeInTheDocument()
   })
 })
