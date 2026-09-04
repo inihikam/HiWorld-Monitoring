@@ -187,19 +187,6 @@ Metrics live in SQLite (WAL). Rollups and retention are on the roadmap (see belo
 - Read-only toward monitored hosts
 - Deploy behind a reverse proxy for TLS
 
-## Roadmap
-
-- [x] Core: agent, collector, SQLite store, REST API
-- [x] Agent self-registration
-- [x] Spike detection + event log (per-process attribution)
-- [x] WebSocket realtime + web dashboard (Material 3)
-- [x] Telegram alerts
-- [x] Turbo mode (adaptive sampling)
-- [ ] Data retention & downsampling config
-- [ ] Event acknowledge + CSV export
-- [ ] Editable detector thresholds from the UI
-- [ ] Network rate charts
-
 ## Development
 
 ```bash
