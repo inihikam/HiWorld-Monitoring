@@ -25,10 +25,21 @@ use crate::store::Store;
 pub struct CollectorConfig {
     pub bind_addr: String,
     pub port: u16,
+    #[serde(default)]
     pub static_dir: Option<String>,
     pub provisioning_token: String,
     pub bootstrap_admin_user: String,
     pub bootstrap_admin_pass: String,
+    pub db_path: String,
+    /// Token bearer yang dipakai collector memanggil agent.
+    pub agent_token: String,
+    /// Interval poll ke agent (ms).
+    #[serde(default = "default_poll_interval")]
+    pub poll_interval_ms: u64,
+}
+
+fn default_poll_interval() -> u64 {
+    10_000
 }
 
 pub struct AppState {

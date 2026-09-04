@@ -72,14 +72,22 @@ impl Poller {
     }
 
     /// Loop produksi: poll tiap interval selamanya.
+    /// Poller berisi Store (rusqlite, !Send) → seluruh struct dipindah ke
+    /// thread blocking khusus (bukan tokio::spawn).
     pub async fn run_forever(mut self) {
-        let mut ticker = tokio::time::interval(self.interval);
-        loop {
-            ticker.tick().await;
-            if let Err(e) = self.poll_once_all().await {
-                tracing::error!("poll loop error: {e}");
-            }
-        }
+        let interval = self.interval;
+        tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async move {
+                let mut ticker = tokio::time::interval(interval);
+                loop {
+                    ticker.tick().await;
+                    if let Err(e) = self.poll_once_all().await {
+                        tracing::error!("poll loop error: {e}");
+                    }
+                }
+            });
+        });
     }
 
     async fn poll_host(&mut self, host_id: &str, agent_url: &str) {

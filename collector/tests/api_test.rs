@@ -16,6 +16,9 @@ fn test_config() -> CollectorConfig {
         provisioning_token: "prov-secret".into(),
         bootstrap_admin_user: "admin".into(),
         bootstrap_admin_pass: "initial-pass-123".into(),
+        db_path: ":memory:".into(),
+        agent_token: "agent-secret".into(),
+        poll_interval_ms: 10_000,
     }
 }
 
@@ -233,17 +236,6 @@ async fn change_password_flow() {
 #[tokio::test]
 async fn history_and_events_with_session() {
     let app = app().await;
-    // isi data via store internal
-    let state_store = {
-        // akses store lewat register endpoint data manual:
-        // untuk test, kita pakai insert via api state — namun store tidak
-        // diekspos; gunakan register+poller-lite: cukup insert langsung
-        // dengan modul store publik (state tidak expose store → test via
-        // Store baru TIDAK memengaruhi app). Solusi: AppState::bootstrap
-        // mengekspos store untuk test via #[cfg(test)]? Lebih simpel:
-        // buat host + insert via /api/agents/register lalu verifikasi /api/hosts.
-        // history kosong pun valid untuk cek auth + format.
-    };
 
     // login
     let login = Request::builder()
