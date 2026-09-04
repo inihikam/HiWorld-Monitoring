@@ -139,16 +139,16 @@ async fn metrics(
 ) -> Result<impl IntoResponse, StatusCode> {
     let st = state.lock().unwrap();
     check_auth(&st, &headers)?;
-    // Render penuh di C3 (golden test terpisah). Stub dulu agar kontrak auth
-    // teruji; text format dijamin header Content-Type benar.
-    let _ = &st.latest;
-    Ok((
-        [(
-            axum::http::header::CONTENT_TYPE,
-            "text/plain; version=0.0.4",
-        )],
-        String::new(),
-    ))
+    match &st.latest {
+        Some(snap) => Ok((
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; version=0.0.4; charset=utf-8",
+            )],
+            crate::metrics::render_prometheus(snap),
+        )),
+        None => Err(StatusCode::SERVICE_UNAVAILABLE),
+    }
 }
 
 /// Konversi ring buffer max_age dari detik config → Duration.
