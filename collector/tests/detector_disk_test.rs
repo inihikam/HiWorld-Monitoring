@@ -3,7 +3,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use hiworld_collector::detector::{ActiveEvent, ActiveEventStore, Detector, DetectorClock};
+use hiworld_collector::detector::{
+    ActiveEvent, ActiveEventStore, BaselineFetcher, Detector, DetectorClock,
+};
 use hiworld_core::models::{DiskMetrics, Snapshot, SystemMetrics};
 
 // reuse fake store & clock dari detector_test (definisi duplikat ringan
@@ -46,6 +48,15 @@ impl ActiveEventStore for FakeStore {
         for k in stale {
             self.delete(&k);
         }
+    }
+}
+
+/// Baseline kosong (CPU/disk test tidak menyentuh mem spike).
+struct NoBaseline;
+
+impl BaselineFetcher for NoBaseline {
+    fn avg_rss(&self, _host_id: &str, _pid: i32) -> Option<(u64, u32)> {
+        None
     }
 }
 
@@ -99,6 +110,7 @@ fn disk_92_percent_warning() {
         FakeStore::default(),
         FakeClock::default(),
         Default::default(),
+        NoBaseline,
     );
     let events = d.evaluate(&snapshot_with_disks(vec![disk("/", 92.0)]));
     assert_eq!(events.len(), 1);
@@ -117,6 +129,7 @@ fn disk_96_percent_critical() {
         FakeStore::default(),
         FakeClock::default(),
         Default::default(),
+        NoBaseline,
     );
     let events = d.evaluate(&snapshot_with_disks(vec![disk("/", 96.0)]));
     assert_eq!(events[0].severity, "critical", ">= 95% → critical");
@@ -128,6 +141,7 @@ fn disk_normal_no_event() {
         FakeStore::default(),
         FakeClock::default(),
         Default::default(),
+        NoBaseline,
     );
     let events = d.evaluate(&snapshot_with_disks(vec![disk("/", 50.0)]));
     assert!(events.is_empty());
@@ -141,6 +155,7 @@ fn disk_dedup_cycle() {
         FakeStore::default(),
         FakeClock::default(),
         Default::default(),
+        NoBaseline,
     );
 
     // 1: penuh → event
@@ -167,6 +182,7 @@ fn disk_two_mountpoints_independent() {
         FakeStore::default(),
         FakeClock::default(),
         Default::default(),
+        NoBaseline,
     );
 
     // "/" dan "/home" sama-sama penuh → dua event terpisah

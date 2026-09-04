@@ -2,9 +2,12 @@
 //! Semua dependensi (store & clock) di-inject via trait — tanpa DB/jam nyata.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
-use hiworld_collector::detector::{ActiveEvent, ActiveEventStore, Detector, DetectorClock};
+use hiworld_collector::detector::{
+    ActiveEvent, ActiveEventStore, BaselineFetcher, Detector, DetectorClock,
+};
 
 // ---------- fake store ----------
 
@@ -98,12 +101,22 @@ fn snapshot(ts: u64, procs: Vec<ProcessInfo>) -> Snapshot {
     }
 }
 
-fn detector() -> Detector<FakeStore, FakeClock> {
+fn detector() -> Detector<FakeStore, FakeClock, NoBaseline> {
     Detector::new(
         FakeStore::default(),
         FakeClock::default(),
         hiworld_collector::api::DetectorConfig::default(),
+        NoBaseline,
     )
+}
+
+/// Baseline kosong: semua proses dianggap tanpa baseline (CPU/disk test fokus).
+struct NoBaseline;
+
+impl BaselineFetcher for NoBaseline {
+    fn avg_rss(&self, _host_id: &str, _pid: i32) -> Option<(u64, u32)> {
+        None
+    }
 }
 
 // ---------- SR-AC-001: spike terdeteksi dengan detail lengkap ----------
@@ -239,23 +252,44 @@ fn active_state_persisted_in_store() {
     );
 }
 
+#[derive(Clone, Default)]
+struct FakeBaseline {
+    data: Rc<RefCell<HashMap<(String, i32), (u64, u32)>>>,
+}
+
+impl BaselineFetcher for FakeBaseline {
+    fn avg_rss(&self, host_id: &str, pid: i32) -> Option<(u64, u32)> {
+        self.data.borrow().get(&(host_id.to_string(), pid)).copied()
+    }
+}
+
 #[test]
 fn persistence_across_restart() {
     // "restart" = detector baru dengan STORE YANG SAMA
     let store = FakeStore::default();
     let cfg = hiworld_collector::api::DetectorConfig::default();
 
-    let mut d1 = Detector::new(store.clone(), FakeClock::default(), cfg.clone());
+    let baseline = FakeBaseline::default();
+    baseline
+        .data
+        .borrow_mut()
+        .insert(("web-01".into(), 1234), (1_000, 10));
+    let mut d1 = Detector::new(
+        store.clone(),
+        FakeClock::default(),
+        cfg.clone(),
+        baseline.clone(),
+    );
     let _ = d1.evaluate(&snapshot(
         1_000,
-        vec![proc(1234, "nginx", Some(90.0), 1_000)],
+        vec![proc(1234, "nginx", Some(90.0), 130_000_000)],
     ));
 
     // detector baru (simulasi restart) — state tetap dari store
-    let mut d2 = Detector::new(store.clone(), FakeClock::default(), cfg);
+    let mut d2 = Detector::new(store.clone(), FakeClock::default(), cfg, baseline);
     let e = d2.evaluate(&snapshot(
         11_000,
-        vec![proc(1234, "nginx", Some(92.0), 1_000)],
+        vec![proc(1234, "nginx", Some(92.0), 140_000_000)],
     ));
     assert!(
         e.is_empty(),

@@ -33,6 +33,12 @@ pub trait DetectorClock {
     fn now_ms(&self) -> u64;
 }
 
+/// Baseline memori: avg RSS per (host, pid) dalam window + jumlah sample.
+/// None = baseline tidak valid (proses terlalu baru — min samples, SD-AC-012).
+pub trait BaselineFetcher {
+    fn avg_rss(&self, host_id: &str, pid: i32) -> Option<(u64, u32)>;
+}
+
 // ---------- event candidate ----------
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,15 +55,21 @@ pub struct EventCandidate {
 const GC_AFTER_MS: u64 = 24 * 3_600_000; // 24 jam (SD-7)
 const CRITICAL_CPU_PERCENT: f64 = 95.0;
 
-pub struct Detector<S: ActiveEventStore, C: DetectorClock> {
+pub struct Detector<S: ActiveEventStore, C: DetectorClock, B: BaselineFetcher> {
     store: S,
     clock: C,
     cfg: DetectorConfig,
+    baseline: B,
 }
 
-impl<S: ActiveEventStore, C: DetectorClock> Detector<S, C> {
-    pub fn new(store: S, clock: C, cfg: DetectorConfig) -> Self {
-        Self { store, clock, cfg }
+impl<S: ActiveEventStore, C: DetectorClock, B: BaselineFetcher> Detector<S, C, B> {
+    pub fn new(store: S, clock: C, cfg: DetectorConfig, baseline: B) -> Self {
+        Self {
+            store,
+            clock,
+            cfg,
+            baseline,
+        }
     }
 
     pub fn store(&self) -> &S {
@@ -80,7 +92,7 @@ impl<S: ActiveEventStore, C: DetectorClock> Detector<S, C> {
 
         self.detect_cpu_spikes(snap, now, &mut events);
         self.detect_disk_full(snap, now, &mut events);
-        // memory baseline di SD4
+        self.detect_mem_spikes(snap, now, &mut events);
 
         events
     }
@@ -131,6 +143,56 @@ impl<S: ActiveEventStore, C: DetectorClock> Detector<S, C> {
 
     fn cpu_key(&self, snap: &Snapshot, pid: i32) -> String {
         format!("spike_cpu:{}:{}", snap.host_id, pid)
+    }
+
+    /// Memory spike: kenaikan RSS vs baseline window (menangkap LEAK,
+    /// bukan proses yang memang besar — SD-AC-011).
+    fn detect_mem_spikes(&mut self, snap: &Snapshot, now: u64, events: &mut Vec<EventCandidate>) {
+        for p in &snap.processes {
+            let key = format!("spike_mem:{}:{}", snap.host_id, p.pid);
+            // baseline valid?
+            let Some((base_rss, sample_count)) = self.baseline.avg_rss(&snap.host_id, p.pid) else {
+                continue; // SD-AC-012: tanpa baseline valid → skip
+            };
+            if sample_count < self.cfg.min_samples_for_baseline {
+                continue; // proses terlalu baru → baseline tidak valid
+            }
+            if base_rss == 0 {
+                continue; // hindari div by zero
+            }
+            let growth_percent =
+                (p.mem_rss_bytes.saturating_sub(base_rss)) as f64 / base_rss as f64 * 100.0;
+            if growth_percent < self.cfg.mem_spike_threshold_percent {
+                self.store.delete(&key); // kembali normal → clear state
+                continue;
+            }
+            match self.store.get(&key) {
+                Some(_) => self.store.touch(&key, now),
+                None => {
+                    self.store.insert(&key, now);
+                    // severity: kenaikan >= 2× threshold → critical (SD-4)
+                    let severity = if growth_percent >= self.cfg.mem_spike_threshold_percent * 2.0 {
+                        "critical"
+                    } else {
+                        "warning"
+                    };
+                    events.push(EventCandidate {
+                        host_id: snap.host_id.clone(),
+                        kind: "spike_mem".into(),
+                        severity: severity.into(),
+                        subject: format!("{} (pid {}, {})", p.comm, p.pid, unit_label(p)),
+                        detail: serde_json::json!({
+                            "baseline_rss_bytes": base_rss,
+                            "current_rss_bytes": p.mem_rss_bytes,
+                            "growth_percent": growth_percent,
+                            "threshold_percent": self.cfg.mem_spike_threshold_percent,
+                            "systemd_unit": p.systemd_unit,
+                            "user": p.user,
+                        }),
+                    });
+                }
+            }
+        }
     }
 
     fn detect_disk_full(&mut self, snap: &Snapshot, now: u64, events: &mut Vec<EventCandidate>) {
