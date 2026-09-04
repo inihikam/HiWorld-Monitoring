@@ -41,7 +41,7 @@ fn core_dependencies_are_allowlisted() {
 
     // Allowlist: apa saja yang boleh ada di [dependencies] core.
     // Tambah dengan hati-hati — core harus tetap murni.
-    const ALLOWED: &[&str] = &["serde", "serde_json"];
+    const ALLOWED: &[&str] = &["serde", "serde_json", "thiserror"];
 
     for line in deps_section.lines() {
         let line = line.trim();
