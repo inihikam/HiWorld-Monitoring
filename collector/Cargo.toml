@@ -14,3 +14,4 @@ clap.workspace = true
 axum = "0.8"
 thiserror = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
+bcrypt = "0.17"
