@@ -25,6 +25,7 @@ fn test_config(token: &str) -> AgentConfig {
             top_n_processes: 5,
             collect_pss: false,
         },
+        collector: None,
     }
 }
 

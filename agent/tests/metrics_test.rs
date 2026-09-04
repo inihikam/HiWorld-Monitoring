@@ -179,6 +179,7 @@ fn app(snapshot: Option<Snapshot>) -> axum::Router {
                 top_n_processes: 5,
                 collect_pss: false,
             },
+            collector: None,
         },
         latest: snapshot,
         backlog: RingBuffer::new(1, std::time::Duration::from_secs(1)),

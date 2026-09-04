@@ -8,6 +8,22 @@ pub struct AgentConfig {
     pub server: ServerConfig,
     #[serde(default)]
     pub sampling: SamplingConfig,
+    /// Auto-register ke collector (Q1). None = agent standalone (SR-AC-005).
+    #[serde(default)]
+    pub collector: Option<CollectorTarget>,
+}
+
+/// Target collector untuk self-register (docs/specs/agent-self-register.md).
+#[derive(Debug, Clone, Deserialize)]
+pub struct CollectorTarget {
+    /// Base URL collector, mis. "http://collector:8080".
+    pub url: String,
+    /// Provisioning token (bukan bearer token agent).
+    pub register_token: String,
+    /// Override URL yang diiklankan ke collector (SR-AC-007).
+    /// Default: http://<bind_addr>:<port> dari [server].
+    #[serde(default)]
+    pub advertised_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -56,6 +72,14 @@ impl AgentConfig {
         if self.server.auth_token.is_empty() {
             return Err(ConfigError::EmptyToken);
         }
+        if let Some(col) = &self.collector {
+            if col.url.is_empty() {
+                return Err(ConfigError::EmptyCollectorUrl);
+            }
+            if col.register_token.is_empty() {
+                return Err(ConfigError::EmptyRegisterToken);
+            }
+        }
         Ok(self)
     }
 }
@@ -76,4 +100,8 @@ pub enum ConfigError {
     },
     #[error("config: auth_token tidak boleh kosong")]
     EmptyToken,
+    #[error("config: collector.url tidak boleh kosong")]
+    EmptyCollectorUrl,
+    #[error("config: collector.register_token tidak boleh kosong")]
+    EmptyRegisterToken,
 }
