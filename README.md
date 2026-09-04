@@ -18,6 +18,14 @@ out-of-the-box).
       └───────────────────────┘
 ```
 
+## Status
+
+**Fondasi arsitektur: SELESAI & TERVERIFIKASI** (2026-09-03)
+- 82 test hijau, clippy `-D warnings` bersih
+- 15/17 acceptance criteria ✅, 1 Should ditunda eksplisit, 0 gagal
+- Smoke test e2e verified (binary musl statis: agent 1.5MB, collector 9.1MB)
+- Retrospective: `docs/plan/architecture-retrospective.md` (lokal)
+
 ## Build
 
 ```bash
@@ -31,6 +39,7 @@ cargo build --release
 
 # statis musl (deploy ke Ubuntu bersih, tanpa dependency .so)
 rustup target add x86_64-unknown-linux-musl
+apt install musl-tools   # ring/rustls butuh musl-gcc
 cargo build --release --target x86_64-unknown-linux-musl
 ```
 
@@ -92,42 +101,17 @@ API utama (butuh session cookie dari `POST /api/login`):
 
 ## Instalasi systemd
 
-`/etc/systemd/system/hiworld-agent.service`:
-
-```ini
-[Unit]
-Description=hiworld-monitoring agent
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-ExecStart=/usr/local/bin/hiworld-agent --config /etc/hiworld/agent.toml
-Restart=always
-RestartSec=5
-User=hiworld
-Group=hiworld
-
-# Hardening (agent hanya butuh BACA /proc & jaringan listen)
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-RestrictAddressFamilies=AF_INET AF_INET6
-ReadOnlyPaths=/proc
-PrivateTmp=yes
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`hiworld-collector.service` serupa, tanpa `ReadOnlyPaths=/proc` tapi dengan
-`ReadWritePaths=<dir db>` bila `ProtectSystem=strict` dipakai.
+Unit hardened tersedia di `scripts/hiworld-agent.service` dan
+`scripts/hiworld-collector.service` (ProtectSystem=strict, NoNewPrivileges,
+MemoryDenyWriteExecute, dll — lihat PDD §10).
 
 ```bash
 sudo useradd -r -s /usr/sbin/nologin hiworld
-sudo systemctl daemon-reload && sudo systemctl enable --now hiworld-agent
+sudo cp target/x86_64-unknown-linux-musl/release/hiworld-* /usr/local/bin/
+sudo cp scripts/hiworld-*.service /etc/systemd/system/
+sudo mkdir -p /etc/hiworld /var/lib/hiworld
+# salin & edit TOML ke /etc/hiworld/
+sudo systemctl daemon-reload && sudo systemctl enable --now hiworld-agent hiworld-collector
 ```
 
 ## Menjalankan test
@@ -136,6 +120,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now hiworld-agent
 cargo test --workspace          # semua test (unit + integration + property)
 cargo clippy --workspace -- -D warnings
 bash scripts/smoke.sh           # e2e: collector+agent nyata, register+poll
+# HIWORLD_BIN=/path/to/bin bash scripts/smoke.sh   # pakai binary kustom
 ```
 
 ## Struktur
@@ -146,7 +131,7 @@ agent/      sampler, ring buffer, HTTP API, /metrics
 collector/  store SQLite, poller+backfill, auth bcrypt, REST API
 web/        dashboard Svelte 5 + M3 (task berikutnya)
 docs/       LOKAL saja (gitignored): specs/, criteria/, plan/ per fitur
-scripts/    smoke.sh (e2e)
+scripts/    smoke.sh + systemd units
 ```
 
 ## Keamanan (v1)
@@ -158,9 +143,9 @@ scripts/    smoke.sh (e2e)
 
 ## Roadmap
 
-- [x] Fondasi arsitektur (agent + collector + store + API) — docs/plan/architecture.md
+- [x] Fondasi arsitektur (agent + collector + store + API) — 82 test, e2e verified
 - [ ] Agent self-register (dari `[collector]` config)
-- [ ] Spike detection + event log
+- [ ] Spike detection + event log (attribution: proses apa penyebab spike)
 - [ ] Telegram alert
 - [ ] Web dashboard (Svelte 5 + M3 + uPlot + WebSocket)
 - [ ] Turbo mode (ubah interval runtime dari UI)
