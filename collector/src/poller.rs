@@ -37,6 +37,8 @@ pub struct Poller {
     /// Dua koneksi DB: main store (mut) + detector store (read baseline).
     detector: Option<crate::detector::Detector<PollerClock>>,
     detector_store: Option<Store>,
+    /// Broadcast realtime (WS1) — None = tanpa broadcast (kompatibilitas).
+    hub: Option<crate::hub::BroadcastHub>,
 }
 
 impl Poller {
@@ -56,18 +58,48 @@ impl Poller {
             backfill_threshold: interval * 2,
             detector: None,
             detector_store: None,
+            hub: None,
         }
     }
 
-    /// Poller dengan detector aktif (SD6).
+    /// Poller dengan detector aktif (SD6) — tanpa broadcast.
     pub fn with_detector(
         store: Store,
         agent_token: String,
         interval: Duration,
         cfg: crate::api::DetectorConfig,
-        _detector_store: Store,
+        detector_store: Store,
     ) -> Self {
+        Self::with_detector_hub(store, agent_token, interval, cfg, detector_store, None)
+    }
+
+    /// Poller lengkap: detector + broadcast hub (WS2).
+    pub fn with_hub(
+        store: Store,
+        agent_token: String,
+        interval: Duration,
+        cfg: crate::api::DetectorConfig,
+        detector_store: Store,
+        hub: crate::hub::BroadcastHub,
+    ) -> Self {
+        Self::with_detector_hub(store, agent_token, interval, cfg, detector_store, Some(hub))
+    }
+
+    /// Konstruktor internal bersama.
+    fn with_detector_hub(
+        store: Store,
+        agent_token: String,
+        interval: Duration,
+        cfg: crate::api::DetectorConfig,
+        detector_store: Store,
+        hub: Option<crate::hub::BroadcastHub>,
+    ) -> Self {
+        let baseline = crate::poller::StoreBaselineRef {
+            store: &detector_store,
+            window_min: cfg.baseline_window_min,
+        };
         let detector = crate::detector::Detector::new(PollerClock, cfg);
+        let _ = baseline; // baseline dibuat per-evaluasi di evaluate (borrow)
         Self {
             store,
             agent_token,
@@ -80,7 +112,8 @@ impl Poller {
             last_seen: HashMap::new(),
             backfill_threshold: interval * 2,
             detector: Some(detector),
-            detector_store: Some(_detector_store),
+            detector_store: Some(detector_store),
+            hub,
         }
     }
 
@@ -172,6 +205,11 @@ impl Poller {
             .insert_snapshot(&snap)
             .map_err(|e| e.to_string())?;
 
+        // WS2: broadcast snapshot ke semua klien dashboard
+        if let Some(hub) = &self.hub {
+            hub.send(crate::hub::BroadcastMessage::Snapshot(snap.clone()));
+        }
+
         // SD6: evaluasi spike; store & baseline diberikan per-evaluasi
         if let (Some(detector), Some(detector_store)) =
             (self.detector.as_mut(), self.detector_store.as_ref())
@@ -184,6 +222,16 @@ impl Poller {
                 self.store
                     .insert_event(&ev.host_id, &ev.kind, &ev.severity, &ev.subject, &ev.detail)
                     .map_err(|e| e.to_string())?;
+                // WS2: broadcast event baru
+                if let Some(hub) = &self.hub {
+                    hub.send(crate::hub::BroadcastMessage::Event {
+                        host_id: ev.host_id.clone(),
+                        kind: ev.kind.clone(),
+                        severity: ev.severity.clone(),
+                        subject: ev.subject.clone(),
+                        detail: ev.detail.clone(),
+                    });
+                }
             }
         }
 
@@ -237,6 +285,13 @@ impl Poller {
                 }),
             );
         }
+        // WS2: broadcast transisi status
+        if let Some(hub) = &self.hub {
+            hub.send(crate::hub::BroadcastMessage::HostStatus {
+                host_id: host_id.to_string(),
+                online: true,
+            });
+        }
     }
 
     fn mark_failure(&mut self, host_id: &str, err: &str) {
@@ -259,6 +314,13 @@ impl Poller {
                 host_id,
                 &serde_json::json!({"error": err}),
             );
+        }
+        // WS2: broadcast transisi status
+        if let Some(hub) = &self.hub {
+            hub.send(crate::hub::BroadcastMessage::HostStatus {
+                host_id: host_id.to_string(),
+                online: false,
+            });
         }
     }
 }
