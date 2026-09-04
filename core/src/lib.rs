@@ -5,6 +5,7 @@
 
 pub mod models;
 pub mod proc_parser;
+pub mod units;
 
 pub use models::{
     DiskMetrics, EventKind, MonitorEvent, NetMetrics, ProcessInfo, Severity, Snapshot,

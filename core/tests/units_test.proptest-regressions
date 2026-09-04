@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0970fbf90a62e70420b60bfcf2878e5235fd5aaf3a6acab772e80feb0a86ef30 # shrinks to t0 = CpuTime { user: 12788, nice: 88, system: 12788, idle: 12789, iowait: 2788, irq: 788, softirq: 788, steal: 788 }, t1 = CpuTime { user: 0, nice: 0, system: 10000, idle: 50001, iowait: 0, irq: 0, softirq: 0, steal: 0 }
