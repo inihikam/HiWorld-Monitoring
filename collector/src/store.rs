@@ -63,7 +63,7 @@ impl Store {
         Self::init(conn)
     }
 
-    fn init(mut conn: Connection) -> Result<Self> {
+    fn init(conn: Connection) -> Result<Self> {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         conn.execute_batch(SCHEMA_V1)?;
         Ok(Self { conn })
