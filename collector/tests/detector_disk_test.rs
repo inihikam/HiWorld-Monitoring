@@ -106,13 +106,12 @@ fn snapshot_with_disks(disks: Vec<DiskMetrics>) -> Snapshot {
 
 #[test]
 fn disk_92_percent_warning() {
-    let mut d = Detector::new(
-        FakeStore::default(),
-        FakeClock::default(),
-        Default::default(),
-        NoBaseline,
+    let mut d = Detector::new(FakeClock::default(), Default::default());
+    let events = d.evaluate(
+        &snapshot_with_disks(vec![disk("/", 92.0)]),
+        &mut FakeStore::default(),
+        &NoBaseline,
     );
-    let events = d.evaluate(&snapshot_with_disks(vec![disk("/", 92.0)]));
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].kind, "disk_almost_full");
     assert_eq!(events[0].severity, "warning");
@@ -125,25 +124,23 @@ fn disk_92_percent_warning() {
 
 #[test]
 fn disk_96_percent_critical() {
-    let mut d = Detector::new(
-        FakeStore::default(),
-        FakeClock::default(),
-        Default::default(),
-        NoBaseline,
+    let mut d = Detector::new(FakeClock::default(), Default::default());
+    let events = d.evaluate(
+        &snapshot_with_disks(vec![disk("/", 96.0)]),
+        &mut FakeStore::default(),
+        &NoBaseline,
     );
-    let events = d.evaluate(&snapshot_with_disks(vec![disk("/", 96.0)]));
     assert_eq!(events[0].severity, "critical", ">= 95% → critical");
 }
 
 #[test]
 fn disk_normal_no_event() {
-    let mut d = Detector::new(
-        FakeStore::default(),
-        FakeClock::default(),
-        Default::default(),
-        NoBaseline,
+    let mut d = Detector::new(FakeClock::default(), Default::default());
+    let events = d.evaluate(
+        &snapshot_with_disks(vec![disk("/", 50.0)]),
+        &mut FakeStore::default(),
+        &NoBaseline,
     );
-    let events = d.evaluate(&snapshot_with_disks(vec![disk("/", 50.0)]));
     assert!(events.is_empty());
 }
 
@@ -151,58 +148,76 @@ fn disk_normal_no_event() {
 
 #[test]
 fn disk_dedup_cycle() {
-    let mut d = Detector::new(
-        FakeStore::default(),
-        FakeClock::default(),
-        Default::default(),
-        NoBaseline,
-    );
+    let mut d = Detector::new(FakeClock::default(), Default::default());
+    let mut store = FakeStore::default();
 
     // 1: penuh → event
-    let e1 = d.evaluate(&snapshot_with_disks(vec![disk("/", 93.0)]));
+    let e1 = d.evaluate(
+        &snapshot_with_disks(vec![disk("/", 93.0)]),
+        &mut store,
+        &NoBaseline,
+    );
     assert_eq!(e1.len(), 1);
 
     // 2: masih penuh → dedup
-    let e2 = d.evaluate(&snapshot_with_disks(vec![disk("/", 94.0)]));
+    let e2 = d.evaluate(
+        &snapshot_with_disks(vec![disk("/", 94.0)]),
+        &mut store,
+        &NoBaseline,
+    );
     assert!(e2.is_empty(), "masih aktif → tidak spam");
 
     // 3: dibersihkan (cleanup berhasil) → tidak ada event, state deleted
-    let e3 = d.evaluate(&snapshot_with_disks(vec![disk("/", 40.0)]));
+    let e3 = d.evaluate(
+        &snapshot_with_disks(vec![disk("/", 40.0)]),
+        &mut store,
+        &NoBaseline,
+    );
     assert!(e3.is_empty());
 
     // 4: penuh lagi → event baru
-    let e4 = d.evaluate(&snapshot_with_disks(vec![disk("/", 95.0)]));
+    let e4 = d.evaluate(
+        &snapshot_with_disks(vec![disk("/", 95.0)]),
+        &mut store,
+        &NoBaseline,
+    );
     assert_eq!(e4.len(), 1, "penuh setelah normal → event baru");
     assert_eq!(e4[0].severity, "critical");
 }
 
 #[test]
 fn disk_two_mountpoints_independent() {
-    let mut d = Detector::new(
-        FakeStore::default(),
-        FakeClock::default(),
-        Default::default(),
-        NoBaseline,
-    );
+    let mut d = Detector::new(FakeClock::default(), Default::default());
+    let mut store = FakeStore::default();
 
     // "/" dan "/home" sama-sama penuh → dua event terpisah
-    let e1 = d.evaluate(&snapshot_with_disks(vec![
-        disk("/", 91.0),
-        disk("/home", 92.0),
-    ]));
+    let e1 = d.evaluate(
+        &snapshot_with_disks(vec![disk("/", 91.0), disk("/home", 92.0)]),
+        &mut store,
+        &NoBaseline,
+    );
     assert_eq!(e1.len(), 2, "mountpoint beda → event terpisah");
 
     // "/" pulih, "/home" masih penuh → tidak ada event baru untuk /home
-    let e2 = d.evaluate(&snapshot_with_disks(vec![
-        disk("/", 30.0),
-        disk("/home", 93.0),
-    ]));
+    let e2 = d.evaluate(
+        &snapshot_with_disks(vec![disk("/", 30.0), disk("/home", 93.0)]),
+        &mut store,
+        &NoBaseline,
+    );
     assert!(e2.is_empty(), "dedup per mountpoint");
 
     // "/home" pulih lalu penuh lagi → event baru hanya /home
-    let e3 = d.evaluate(&snapshot_with_disks(vec![disk("/home", 40.0)]));
+    let e3 = d.evaluate(
+        &snapshot_with_disks(vec![disk("/home", 40.0)]),
+        &mut FakeStore::default(),
+        &NoBaseline,
+    );
     assert!(e3.is_empty());
-    let e4 = d.evaluate(&snapshot_with_disks(vec![disk("/home", 96.0)]));
+    let e4 = d.evaluate(
+        &snapshot_with_disks(vec![disk("/home", 96.0)]),
+        &mut FakeStore::default(),
+        &NoBaseline,
+    );
     assert_eq!(e4.len(), 1);
     assert!(e4[0].subject.contains("/home"));
 }

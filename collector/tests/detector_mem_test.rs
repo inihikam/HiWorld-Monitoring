@@ -109,15 +109,16 @@ fn mem_leak_detected_vs_baseline() {
         .borrow_mut()
         .insert(("db-01".into(), 1234), (100_000_000, 10));
 
-    let mut d = Detector::new(
-        FakeStore::default(),
-        FakeClock::default(),
-        Default::default(),
-        baseline,
-    );
+    let mut d = Detector::new(FakeClock::default(), Default::default());
+
+    let mut store = FakeStore::default();
 
     // sekarang naik ke 130MB = +30% ≥ threshold 10% → event spike_mem
-    let events = d.evaluate(&snapshot(1_000, vec![proc(1234, "nginx", 130_000_000)]));
+    let events = d.evaluate(
+        &snapshot(1_000, vec![proc(1234, "nginx", 130_000_000)]),
+        &mut store,
+        &baseline,
+    );
     assert_eq!(events.len(), 1);
     let e = &events[0];
     assert_eq!(e.kind, "spike_mem");
@@ -139,14 +140,15 @@ fn mem_growth_20_percent_is_critical() {
         .borrow_mut()
         .insert(("db-01".into(), 1234), (100_000_000, 10));
 
-    let mut d = Detector::new(
-        FakeStore::default(),
-        FakeClock::default(),
-        Default::default(),
-        baseline,
-    );
+    let mut d = Detector::new(FakeClock::default(), Default::default());
+    let mut store = FakeStore::default();
+
     // +25% >= 2×10% = 20% → critical (SD-4 dua tingkat)
-    let events = d.evaluate(&snapshot(1_000, vec![proc(1234, "nginx", 125_000_000)]));
+    let events = d.evaluate(
+        &snapshot(1_000, vec![proc(1234, "nginx", 125_000_000)]),
+        &mut store,
+        &baseline,
+    );
     assert_eq!(events.len(), 1);
     assert_eq!(
         events[0].severity, "critical",
@@ -165,14 +167,15 @@ fn big_but_stable_process_no_event() {
         .borrow_mut()
         .insert(("db-01".into(), 999), (500_000_000, 20));
 
-    let mut d = Detector::new(
-        FakeStore::default(),
-        FakeClock::default(),
-        Default::default(),
-        baseline,
-    );
+    let mut d = Detector::new(FakeClock::default(), Default::default());
+    let mut store = FakeStore::default();
+
     // sekarang 502MB = +0.4% → di bawah threshold
-    let events = d.evaluate(&snapshot(1_000, vec![proc(999, "redis", 502_000_000)]));
+    let events = d.evaluate(
+        &snapshot(1_000, vec![proc(999, "redis", 502_000_000)]),
+        &mut store,
+        &baseline,
+    );
     assert!(
         events.is_empty(),
         "proses memang besar & stabil → BUKAN spike; dapat {events:?}"
@@ -190,14 +193,15 @@ fn too_few_samples_no_baseline_no_event() {
         .borrow_mut()
         .insert(("db-01".into(), 777), (10_000_000, 2));
 
-    let mut d = Detector::new(
-        FakeStore::default(),
-        FakeClock::default(),
-        Default::default(),
-        baseline,
-    );
+    let mut d = Detector::new(FakeClock::default(), Default::default());
+    let mut store = FakeStore::default();
+
     // RSS naik besar → tetap TIDAK ada event karena baseline belum valid
-    let events = d.evaluate(&snapshot(1_000, vec![proc(777, "newapp", 50_000_000)]));
+    let events = d.evaluate(
+        &snapshot(1_000, vec![proc(777, "newapp", 50_000_000)]),
+        &mut store,
+        &baseline,
+    );
     assert!(
         events.is_empty(),
         "proses tanpa baseline valid → skip (false positive guard)"
@@ -207,16 +211,13 @@ fn too_few_samples_no_baseline_no_event() {
 #[test]
 fn no_baseline_entry_at_all_skipped() {
     let baseline = FakeBaseline::default();
-    let mut d = Detector::new(
-        FakeStore::default(),
-        FakeClock::default(),
-        Default::default(),
-        baseline,
+    let mut d = Detector::new(FakeClock::default(), Default::default());
+    let mut store = FakeStore::default();
+    let events = d.evaluate(
+        &snapshot(1_000, vec![proc(555, "unknown-proc", 900_000_000)]),
+        &mut store,
+        &baseline,
     );
-    let events = d.evaluate(&snapshot(
-        1_000,
-        vec![proc(555, "unknown-proc", 900_000_000)],
-    ));
     assert!(events.is_empty(), "proses tak dikenal → skip");
 }
 
@@ -230,27 +231,40 @@ fn mem_spike_dedup_cycle() {
         .borrow_mut()
         .insert(("db-01".into(), 1234), (100_000_000, 10));
 
-    let mut d = Detector::new(
-        FakeStore::default(),
-        FakeClock::default(),
-        Default::default(),
-        baseline,
-    );
+    let mut d = Detector::new(FakeClock::default(), Default::default());
+
+    let mut store = FakeStore::default();
 
     // 1: leak mulai → event
-    let e1 = d.evaluate(&snapshot(1_000, vec![proc(1234, "nginx", 130_000_000)]));
+    let e1 = d.evaluate(
+        &snapshot(1_000, vec![proc(1234, "nginx", 130_000_000)]),
+        &mut store,
+        &baseline,
+    );
     assert_eq!(e1.len(), 1);
 
     // 2: masih leak → dedup
-    let e2 = d.evaluate(&snapshot(11_000, vec![proc(1234, "nginx", 140_000_000)]));
+    let e2 = d.evaluate(
+        &snapshot(11_000, vec![proc(1234, "nginx", 140_000_000)]),
+        &mut store,
+        &baseline,
+    );
     assert!(e2.is_empty(), "spike mem masih aktif → tidak spam");
 
     // 3: kembali normal (restart proses) → state cleared
-    let e3 = d.evaluate(&snapshot(21_000, vec![proc(1234, "nginx", 100_000_000)]));
+    let e3 = d.evaluate(
+        &snapshot(21_000, vec![proc(1234, "nginx", 100_000_000)]),
+        &mut store,
+        &baseline,
+    );
     assert!(e3.is_empty());
 
     // 4: leak lagi → event baru
-    let e4 = d.evaluate(&snapshot(31_000, vec![proc(1234, "nginx", 135_000_000)]));
+    let e4 = d.evaluate(
+        &snapshot(31_000, vec![proc(1234, "nginx", 135_000_000)]),
+        &mut store,
+        &baseline,
+    );
     assert_eq!(e4.len(), 1);
 }
 
@@ -269,18 +283,23 @@ fn mem_spike_threshold_respects_config() {
         mem_spike_threshold_percent: 25.0,
         ..Default::default()
     };
-    let mut d = Detector::new(
-        FakeStore::default(),
-        FakeClock::default(),
-        cfg,
-        baseline.clone(),
-    );
+    let mut d = Detector::new(FakeClock::default(), cfg);
+
+    let mut store = FakeStore::default();
 
     // +15% → di bawah 25% → tidak ada event
-    let e1 = d.evaluate(&snapshot(1_000, vec![proc(1234, "nginx", 115_000_000)]));
+    let e1 = d.evaluate(
+        &snapshot(1_000, vec![proc(1234, "nginx", 115_000_000)]),
+        &mut store,
+        &baseline,
+    );
     assert!(e1.is_empty(), "di bawah threshold custom");
 
     // +30% → di atas 25% → event
-    let e2 = d.evaluate(&snapshot(2_000, vec![proc(1234, "nginx", 130_000_000)]));
+    let e2 = d.evaluate(
+        &snapshot(2_000, vec![proc(1234, "nginx", 130_000_000)]),
+        &mut store,
+        &baseline,
+    );
     assert_eq!(e2.len(), 1, "di atas threshold custom");
 }

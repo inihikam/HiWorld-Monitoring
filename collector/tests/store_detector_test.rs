@@ -190,26 +190,13 @@ fn active_event_gc_removes_stale() {
 
 #[test]
 fn detector_with_sqlite_store_persists() {
-    let store = Store::open_in_memory().unwrap();
-    let mut d = hiworld_collector::detector::Detector::new(
-        &store,
-        TestClock(1_000),
-        Default::default(),
-        NoBaseline,
-    );
+    let mut store = Store::open_in_memory().unwrap();
+    let mut d = hiworld_collector::detector::Detector::new(TestClock(1_000), Default::default());
 
     // spike → event + state tersimpan di SQLite asli
-    let events = d.evaluate(&fixture_snapshot(
-        "web-01",
-        1_000,
-        vec![proc(1234, 100)], // cpu 1% — tidak spike; gunakan cpu tinggi:
-    ));
-    let _ = events;
-
-    // verifikasi langsung via detector dengan cpu spike
     let mut snap = fixture_snapshot("web-01", 2_000, vec![proc(1234, 100)]);
     snap.processes[0].cpu_percent = Some(95.0);
-    let events = d.evaluate(&snap);
+    let events = d.evaluate(&snap, &mut store, &NoBaseline);
     assert_eq!(events.len(), 1, "cpu spike");
 
     assert!(
@@ -222,7 +209,7 @@ fn detector_with_sqlite_store_persists() {
 
     // evaluasi ulang → dedup (tidak ada event baru)
     snap.timestamp_ms = 3_000;
-    let events = d.evaluate(&snap);
+    let events = d.evaluate(&snap, &mut store, &NoBaseline);
     assert!(events.is_empty(), "dedup via SQLite");
 }
 

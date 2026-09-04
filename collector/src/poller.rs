@@ -32,9 +32,16 @@ pub struct Poller {
     /// Batas gap untuk memicu backfill: bila (snapshot_ts - last_seen) melebihi
     /// 2× interval, tarik /backlog?since=last_seen. Di bawah itu cukup /snapshot.
     backfill_threshold: Duration,
+    /// Spike detector (SD6) — None = deteksi nonaktif.
+    /// Detector stateless; store aktif & baseline diberikan per evaluasi.
+    /// Dua koneksi DB: main store (mut) + detector store (read baseline).
+    detector: Option<crate::detector::Detector<PollerClock>>,
+    detector_store: Option<Store>,
 }
 
 impl Poller {
+    /// Poller tanpa detector (agent standalone / kompatibilitas).
+    /// Produksi: pakai `with_detector` dengan koneksi store kedua.
     pub fn new(store: Store, agent_token: String, interval: Duration) -> Self {
         Self {
             store,
@@ -47,6 +54,33 @@ impl Poller {
             statuses: HashMap::new(),
             last_seen: HashMap::new(),
             backfill_threshold: interval * 2,
+            detector: None,
+            detector_store: None,
+        }
+    }
+
+    /// Poller dengan detector aktif (SD6).
+    pub fn with_detector(
+        store: Store,
+        agent_token: String,
+        interval: Duration,
+        cfg: crate::api::DetectorConfig,
+        _detector_store: Store,
+    ) -> Self {
+        let detector = crate::detector::Detector::new(PollerClock, cfg);
+        Self {
+            store,
+            agent_token,
+            interval,
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .expect("reqwest client"),
+            statuses: HashMap::new(),
+            last_seen: HashMap::new(),
+            backfill_threshold: interval * 2,
+            detector: Some(detector),
+            detector_store: Some(_detector_store),
         }
     }
 
@@ -123,7 +157,7 @@ impl Poller {
     /// Simpan snapshot terbaru; bila gap terdeteksi (ts - last_seen > threshold),
     /// tarik backlog agent sejak last_seen dan insert (Q2: backfill v1).
     async fn store_snapshot_and_backfill(
-        &self,
+        &mut self,
         _host_id: &str,
         agent_url: &str,
         snap: Snapshot,
@@ -137,6 +171,21 @@ impl Poller {
         self.store
             .insert_snapshot(&snap)
             .map_err(|e| e.to_string())?;
+
+        // SD6: evaluasi spike; store & baseline diberikan per-evaluasi
+        if let (Some(detector), Some(detector_store)) =
+            (self.detector.as_mut(), self.detector_store.as_ref())
+        {
+            let baseline = StoreBaselineRef {
+                store: detector_store,
+                window_min: detector.mem_window_min(),
+            };
+            for ev in detector.evaluate(&snap, &mut self.store, &baseline) {
+                self.store
+                    .insert_event(&ev.host_id, &ev.kind, &ev.severity, &ev.subject, &ev.detail)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
 
         if is_gap {
             let since_ms = since.unwrap_or(0);
@@ -194,5 +243,37 @@ impl Poller {
                 &serde_json::json!({"error": err}),
             );
         }
+    }
+}
+
+/// Clock produksi untuk detector (waktu nyata).
+pub struct PollerClock;
+
+impl crate::detector::DetectorClock for PollerClock {
+    fn now_ms(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+}
+
+/// BaselineFetcher yang MEMINJAM Store (parameter evaluasi, bukan dimiliki).
+pub struct StoreBaselineRef<'a> {
+    pub store: &'a Store,
+    pub window_min: u32,
+}
+
+impl crate::detector::BaselineFetcher for StoreBaselineRef<'_> {
+    fn avg_rss(&self, host_id: &str, pid: i32) -> Option<(u64, u32)> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let from = now.saturating_sub(self.window_min as u64 * 60_000);
+        self.store
+            .avg_rss_baseline(host_id, pid, from, now)
+            .ok()
+            .flatten()
     }
 }

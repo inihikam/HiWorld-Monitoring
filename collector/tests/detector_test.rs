@@ -101,12 +101,10 @@ fn snapshot(ts: u64, procs: Vec<ProcessInfo>) -> Snapshot {
     }
 }
 
-fn detector() -> Detector<FakeStore, FakeClock, NoBaseline> {
+fn detector() -> Detector<FakeClock> {
     Detector::new(
-        FakeStore::default(),
         FakeClock::default(),
         hiworld_collector::api::DetectorConfig::default(),
-        NoBaseline,
     )
 }
 
@@ -125,7 +123,7 @@ impl BaselineFetcher for NoBaseline {
 fn cpu_spike_emits_event_with_full_detail() {
     let mut d = detector();
     let snap = snapshot(1_000, vec![proc(1234, "nginx", Some(91.2), 52_428_800)]);
-    let events = d.evaluate(&snap);
+    let events = d.evaluate(&snap, &mut FakeStore::default(), &NoBaseline);
 
     assert_eq!(events.len(), 1, "satu spike → satu event");
     let e = &events[0];
@@ -153,7 +151,7 @@ fn cpu_spike_emits_event_with_full_detail() {
 fn cpu_96_percent_is_critical() {
     let mut d = detector();
     let snap = snapshot(1_000, vec![proc(1, "stress", Some(96.0), 1_000)]);
-    let events = d.evaluate(&snap);
+    let events = d.evaluate(&snap, &mut FakeStore::default(), &NoBaseline);
     assert_eq!(events[0].severity, "critical", ">= 95% → critical");
 }
 
@@ -161,7 +159,7 @@ fn cpu_96_percent_is_critical() {
 fn cpu_94_percent_is_warning() {
     let mut d = detector();
     let snap = snapshot(1_000, vec![proc(1, "stress", Some(94.0), 1_000)]);
-    let events = d.evaluate(&snap);
+    let events = d.evaluate(&snap, &mut FakeStore::default(), &NoBaseline);
     assert_eq!(events[0].severity, "warning");
 }
 
@@ -171,7 +169,9 @@ fn cpu_94_percent_is_warning() {
 fn normal_cpu_no_event() {
     let mut d = detector();
     let snap = snapshot(1_000, vec![proc(1, "nginx", Some(40.0), 1_000)]);
-    assert!(d.evaluate(&snap).is_empty());
+    assert!(d
+        .evaluate(&snap, &mut FakeStore::default(), &NoBaseline)
+        .is_empty());
 }
 
 // ---------- SD-AC-004: dedup 4-snapshot cycle ----------
@@ -179,33 +179,34 @@ fn normal_cpu_no_event() {
 #[test]
 fn dedup_cycle_spike_spike_normal_spike() {
     let mut d = detector();
+    let mut store = FakeStore::default();
 
-    // snapshot 1: spike → event
-    let e1 = d.evaluate(&snapshot(
-        1_000,
-        vec![proc(1234, "nginx", Some(90.0), 1_000)],
-    ));
+    let e1 = d.evaluate(
+        &snapshot(1_000, vec![proc(1234, "nginx", Some(90.0), 1_000)]),
+        &mut store,
+        &NoBaseline,
+    );
     assert_eq!(e1.len(), 1, "spike pertama → event");
 
-    // snapshot 2: masih spike pid sama → TIDAK ada event baru (dedup)
-    let e2 = d.evaluate(&snapshot(
-        11_000,
-        vec![proc(1234, "nginx", Some(92.0), 1_000)],
-    ));
+    let e2 = d.evaluate(
+        &snapshot(11_000, vec![proc(1234, "nginx", Some(92.0), 1_000)]),
+        &mut store,
+        &NoBaseline,
+    );
     assert!(e2.is_empty(), "masih aktif → tidak spam");
 
-    // snapshot 3: normal → tidak ada event, tapi state dibersihkan
-    let e3 = d.evaluate(&snapshot(
-        21_000,
-        vec![proc(1234, "nginx", Some(10.0), 1_000)],
-    ));
+    let e3 = d.evaluate(
+        &snapshot(21_000, vec![proc(1234, "nginx", Some(10.0), 1_000)]),
+        &mut store,
+        &NoBaseline,
+    );
     assert!(e3.is_empty());
 
-    // snapshot 4: spike lagi → event BARU
-    let e4 = d.evaluate(&snapshot(
-        31_000,
-        vec![proc(1234, "nginx", Some(90.0), 1_000)],
-    ));
+    let e4 = d.evaluate(
+        &snapshot(31_000, vec![proc(1234, "nginx", Some(90.0), 1_000)]),
+        &mut store,
+        &NoBaseline,
+    );
     assert_eq!(e4.len(), 1, "spike setelah normal → event baru");
 }
 
@@ -221,7 +222,7 @@ fn two_pids_spiking_two_events() {
             proc(2, "build", Some(88.0), 1_000),
         ],
     );
-    let events = d.evaluate(&snap);
+    let events = d.evaluate(&snap, &mut FakeStore::default(), &NoBaseline);
     assert_eq!(events.len(), 2, "pid beda → event terpisah");
 }
 
@@ -231,7 +232,11 @@ fn two_pids_spiking_two_events() {
 fn cpu_none_skipped_no_panic() {
     let mut d = detector();
     let snap = snapshot(1_000, vec![proc(1, "first-sample", None, 1_000)]);
-    assert!(d.evaluate(&snap).is_empty(), "None → skip (ADR-1/SD-5)");
+    assert!(
+        d.evaluate(&snap, &mut FakeStore::default(), &NoBaseline)
+            .is_empty(),
+        "None → skip (ADR-1/SD-5)"
+    );
 }
 
 // ---------- Opsi B: persistence via store ----------
@@ -239,13 +244,14 @@ fn cpu_none_skipped_no_panic() {
 #[test]
 fn active_state_persisted_in_store() {
     let mut d = detector();
-    let _ = d.evaluate(&snapshot(
-        1_000,
-        vec![proc(1234, "nginx", Some(90.0), 1_000)],
-    ));
+    let mut store = FakeStore::default();
+    let _ = d.evaluate(
+        &snapshot(1_000, vec![proc(1234, "nginx", Some(90.0), 1_000)]),
+        &mut store,
+        &NoBaseline,
+    );
 
     // state tersimpan di store (bukan cuma in-memory struct)
-    let store = d.store();
     assert!(
         store.get("spike_cpu:web-01:1234").is_some(),
         "key aktif harus ada di store (Opsi B)"
@@ -266,7 +272,7 @@ impl BaselineFetcher for FakeBaseline {
 #[test]
 fn persistence_across_restart() {
     // "restart" = detector baru dengan STORE YANG SAMA
-    let store = FakeStore::default();
+    let mut store = FakeStore::default();
     let cfg = hiworld_collector::api::DetectorConfig::default();
 
     let baseline = FakeBaseline::default();
@@ -274,23 +280,20 @@ fn persistence_across_restart() {
         .data
         .borrow_mut()
         .insert(("web-01".into(), 1234), (1_000, 10));
-    let mut d1 = Detector::new(
-        store.clone(),
-        FakeClock::default(),
-        cfg.clone(),
-        baseline.clone(),
+    let mut d1 = Detector::new(FakeClock::default(), cfg.clone());
+    let _ = d1.evaluate(
+        &snapshot(1_000, vec![proc(1234, "nginx", Some(90.0), 130_000_000)]),
+        &mut store,
+        &baseline,
     );
-    let _ = d1.evaluate(&snapshot(
-        1_000,
-        vec![proc(1234, "nginx", Some(90.0), 130_000_000)],
-    ));
 
     // detector baru (simulasi restart) — state tetap dari store
-    let mut d2 = Detector::new(store.clone(), FakeClock::default(), cfg, baseline);
-    let e = d2.evaluate(&snapshot(
-        11_000,
-        vec![proc(1234, "nginx", Some(92.0), 140_000_000)],
-    ));
+    let mut d2 = Detector::new(FakeClock::default(), cfg);
+    let e = d2.evaluate(
+        &snapshot(11_000, vec![proc(1234, "nginx", Some(92.0), 140_000_000)]),
+        &mut store,
+        &baseline,
+    );
     assert!(
         e.is_empty(),
         "Opsi B: setelah restart, spike aktif TIDAK diterbitkan ulang"
@@ -302,18 +305,23 @@ fn persistence_across_restart() {
 #[test]
 fn gc_removes_stale_entries() {
     let mut d = detector();
-    let _ = d.evaluate(&snapshot(
-        1_000,
-        vec![proc(1234, "nginx", Some(90.0), 1_000)],
-    ));
+    let mut gc_store = FakeStore::default();
+    let _ = d.evaluate(
+        &snapshot(1_000, vec![proc(1234, "nginx", Some(90.0), 1_000)]),
+        &mut gc_store,
+        &NoBaseline,
+    );
 
     // maju waktu > 24 jam tanpa touch → GC harus membersihkan
     d.clock_mut().0 = 1_000 + 25 * 3_600_000;
-    let _ = d.evaluate(&snapshot(1_000 + 25 * 3_600_000, vec![]));
+    let _ = d.evaluate(
+        &snapshot(1_000 + 25 * 3_600_000, vec![]),
+        &mut gc_store,
+        &NoBaseline,
+    );
 
-    let store = d.store();
     assert!(
-        store.get("spike_cpu:web-01:1234").is_none(),
+        gc_store.get("spike_cpu:web-01:1234").is_none(),
         "stale key (> 24 jam) dibuang oleh GC"
     );
 }

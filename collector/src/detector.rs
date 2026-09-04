@@ -55,25 +55,19 @@ pub struct EventCandidate {
 const GC_AFTER_MS: u64 = 24 * 3_600_000; // 24 jam (SD-7)
 const CRITICAL_CPU_PERCENT: f64 = 95.0;
 
-pub struct Detector<S: ActiveEventStore, C: DetectorClock, B: BaselineFetcher> {
-    store: S,
+pub struct Detector<C: DetectorClock> {
     clock: C,
     cfg: DetectorConfig,
-    baseline: B,
 }
 
-impl<S: ActiveEventStore, C: DetectorClock, B: BaselineFetcher> Detector<S, C, B> {
-    pub fn new(store: S, clock: C, cfg: DetectorConfig, baseline: B) -> Self {
-        Self {
-            store,
-            clock,
-            cfg,
-            baseline,
-        }
+impl<C: DetectorClock> Detector<C> {
+    pub fn new(clock: C, cfg: DetectorConfig) -> Self {
+        Self { clock, cfg }
     }
 
-    pub fn store(&self) -> &S {
-        &self.store
+    /// Window baseline memori (menit) — dipakai caller membaca baseline.
+    pub fn mem_window_min(&self) -> u32 {
+        self.cfg.baseline_window_min
     }
 
     /// Akses clock (hanya untuk test — introspeksi & manipulasi waktu).
@@ -82,42 +76,54 @@ impl<S: ActiveEventStore, C: DetectorClock, B: BaselineFetcher> Detector<S, C, B
     }
 
     /// Evaluasi satu snapshot. Idempotent terhadap dedup: spike aktif
-    /// tidak menghasilkan event kedua.
-    pub fn evaluate(&mut self, snap: &Snapshot) -> Vec<EventCandidate> {
+    /// tidak menghasilkan event kedua. Store & baseline diberikan per
+    /// evaluasi — detector tidak memiliki I/O state (murni + injeksi).
+    pub fn evaluate(
+        &mut self,
+        snap: &Snapshot,
+        store: &mut impl ActiveEventStore,
+        baseline: &impl BaselineFetcher,
+    ) -> Vec<EventCandidate> {
         let now = self.clock.now_ms();
         let mut events = Vec::new();
 
         // GC stale (SD-7) — murah, jalan tiap evaluasi
-        self.store.gc(now.saturating_sub(GC_AFTER_MS));
+        store.gc(now.saturating_sub(GC_AFTER_MS));
 
-        self.detect_cpu_spikes(snap, now, &mut events);
-        self.detect_disk_full(snap, now, &mut events);
-        self.detect_mem_spikes(snap, now, &mut events);
+        self.detect_cpu_spikes(snap, store, now, &mut events);
+        self.detect_disk_full(snap, store, now, &mut events);
+        self.detect_mem_spikes(snap, store, baseline, now, &mut events);
 
         events
     }
 
-    fn detect_cpu_spikes(&mut self, snap: &Snapshot, now: u64, events: &mut Vec<EventCandidate>) {
+    fn detect_cpu_spikes(
+        &mut self,
+        snap: &Snapshot,
+        store: &mut impl ActiveEventStore,
+        now: u64,
+        events: &mut Vec<EventCandidate>,
+    ) {
         for p in &snap.processes {
             let Some(cpu) = p.cpu_percent else {
                 continue; // sample pertama / tanpa delta (SD-5)
             };
             if cpu < self.cfg.cpu_spike_threshold_percent {
                 // normal → bersihkan state aktif bila ada (siklus Opsi B langkah 3)
-                self.store.delete(&self.cpu_key(snap, p.pid));
+                store.delete(&self.cpu_key(snap, p.pid));
                 continue;
             }
 
             let key = self.cpu_key(snap, p.pid);
-            match self.store.get(&key) {
+            match store.get(&key) {
                 Some(active) => {
                     // masih spike → cukup touch last_seen (langkah 2)
-                    self.store.touch(&key, now);
+                    store.touch(&key, now);
                     let _ = active;
                 }
                 None => {
                     // spike baru → INSERT + terbitkan event (langkah 1)
-                    self.store.insert(&key, now);
+                    store.insert(&key, now);
                     let severity = if cpu >= CRITICAL_CPU_PERCENT {
                         "critical"
                     } else {
@@ -147,11 +153,18 @@ impl<S: ActiveEventStore, C: DetectorClock, B: BaselineFetcher> Detector<S, C, B
 
     /// Memory spike: kenaikan RSS vs baseline window (menangkap LEAK,
     /// bukan proses yang memang besar — SD-AC-011).
-    fn detect_mem_spikes(&mut self, snap: &Snapshot, now: u64, events: &mut Vec<EventCandidate>) {
+    fn detect_mem_spikes(
+        &mut self,
+        snap: &Snapshot,
+        store: &mut impl ActiveEventStore,
+        baseline: &impl BaselineFetcher,
+        now: u64,
+        events: &mut Vec<EventCandidate>,
+    ) {
         for p in &snap.processes {
             let key = format!("spike_mem:{}:{}", snap.host_id, p.pid);
             // baseline valid?
-            let Some((base_rss, sample_count)) = self.baseline.avg_rss(&snap.host_id, p.pid) else {
+            let Some((base_rss, sample_count)) = baseline.avg_rss(&snap.host_id, p.pid) else {
                 continue; // SD-AC-012: tanpa baseline valid → skip
             };
             if sample_count < self.cfg.min_samples_for_baseline {
@@ -163,13 +176,13 @@ impl<S: ActiveEventStore, C: DetectorClock, B: BaselineFetcher> Detector<S, C, B
             let growth_percent =
                 (p.mem_rss_bytes.saturating_sub(base_rss)) as f64 / base_rss as f64 * 100.0;
             if growth_percent < self.cfg.mem_spike_threshold_percent {
-                self.store.delete(&key); // kembali normal → clear state
+                store.delete(&key); // kembali normal → clear state
                 continue;
             }
-            match self.store.get(&key) {
-                Some(_) => self.store.touch(&key, now),
+            match store.get(&key) {
+                Some(_) => store.touch(&key, now),
                 None => {
-                    self.store.insert(&key, now);
+                    store.insert(&key, now);
                     // severity: kenaikan >= 2× threshold → critical (SD-4)
                     let severity = if growth_percent >= self.cfg.mem_spike_threshold_percent * 2.0 {
                         "critical"
@@ -195,17 +208,23 @@ impl<S: ActiveEventStore, C: DetectorClock, B: BaselineFetcher> Detector<S, C, B
         }
     }
 
-    fn detect_disk_full(&mut self, snap: &Snapshot, now: u64, events: &mut Vec<EventCandidate>) {
+    fn detect_disk_full(
+        &mut self,
+        snap: &Snapshot,
+        store: &mut impl ActiveEventStore,
+        now: u64,
+        events: &mut Vec<EventCandidate>,
+    ) {
         for d in &snap.system.disks {
             let key = format!("disk_full:{}:{}", snap.host_id, d.mount);
             if d.percent < self.cfg.disk_full_threshold_percent {
-                self.store.delete(&key);
+                store.delete(&key);
                 continue;
             }
-            match self.store.get(&key) {
-                Some(_) => self.store.touch(&key, now),
+            match store.get(&key) {
+                Some(_) => store.touch(&key, now),
                 None => {
-                    self.store.insert(&key, now);
+                    store.insert(&key, now);
                     let severity = if d.percent >= 95.0 {
                         "critical"
                     } else {
