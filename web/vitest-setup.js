@@ -1,6 +1,14 @@
 import { vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 
+// jsdom tidak punya ResizeObserver (TimeChart pakai)
+class MockResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+window.ResizeObserver = window.ResizeObserver || MockResizeObserver
+
 // jsdom tidak punya matchMedia — stub global (App pakai utk breakpoint)
 window.matchMedia = window.matchMedia || ((q) => ({
   matches: false,

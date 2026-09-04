@@ -70,13 +70,14 @@ describe('App shell (WD7+WD8)', () => {
     })
   })
 
-  it('host route: host detail placeholder dengan id', async () => {
+  it('host route: host detail page dengan id', async () => {
     setSize(1200)
     at('#/host/web-01')
     render(App)
     await vi.waitFor(() => {
-      expect(screen.getByTestId('page-host')).toHaveTextContent('web-01')
+      expect(screen.getByTestId('detail-page')).toBeInTheDocument()
     })
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('web-01')
   })
 
   it('toggle theme di TopBar mengubah data-theme (WD-AC-005 via shell)', async () => {

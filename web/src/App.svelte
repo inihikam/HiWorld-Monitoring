@@ -8,6 +8,7 @@
   import Badge from './lib/m3/Badge.svelte'
   import LoginPage from './pages/LoginPage.svelte'
   import OverviewPage from './pages/OverviewPage.svelte'
+  import HostDetailPage from './pages/HostDetailPage.svelte'
   import { i18n, t, setLocale, availableLocales } from './lib/i18n.svelte.js'
   import { theme, toggleTheme, applyTheme } from './lib/theme.svelte.js'
   import { route as routeState, navigate } from './lib/router.svelte.js'
@@ -138,8 +139,8 @@
           <h1>{t('nav.overview')}</h1>
           <OverviewPage />
         {:else if route.startsWith('/host/')}
-          <h1>{t('nav.host_detail')}</h1>
-          <p data-testid="page-host">host detail placeholder (WH3): {route}</p>
+          {@const hostId = route.split('/')[2]}
+          <HostDetailPage {hostId} />
         {:else if route === '/events'}
           <h1>{t('nav.events')}</h1>
           <p data-testid="page-events">events placeholder (WE2)</p>
