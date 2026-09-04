@@ -9,12 +9,14 @@
   import LoginPage from './pages/LoginPage.svelte'
   import OverviewPage from './pages/OverviewPage.svelte'
   import HostDetailPage from './pages/HostDetailPage.svelte'
+  import EventsPage from './pages/EventsPage.svelte'
   import { i18n, t, setLocale, availableLocales } from './lib/i18n.svelte.js'
   import { theme, toggleTheme, applyTheme } from './lib/theme.svelte.js'
   import { route as routeState, navigate } from './lib/router.svelte.js'
   import { checkAuth, setUnauthorizedHandler, logout } from './lib/api.js'
   import { createWsClient } from './lib/ws.js'
   import { hostsStore, applyHello, applySnapshot, applyStatus } from './lib/stores/hosts.svelte.js'
+  import { applyWsEvent } from './lib/stores/events.svelte.js'
 
   const route = $derived(routeState.path)
   let isMobile = $state(window.innerWidth < 900)
@@ -35,7 +37,13 @@
     ws = createWsClient({
       onHello: (data) => applyHello(data),
       onSnapshot: (snap) => applySnapshot(snap),
-      onEvent: () => (eventsBadge += 1),
+      onEvent: (ev) => {
+        eventsBadge += 1
+        applyWsEvent(ev)
+        if (document.hidden) {
+          document.title = `(${eventsBadge}) hiworld`
+        }
+      },
       onHostStatus: (st) => applyStatus(st),
       onStateChange: (s) => (wsState = s),
     })
@@ -53,6 +61,22 @@
       }
     })
     return () => ws?.close()
+  })
+
+  // WE4: fokus kembali → reset badge & title
+  $effect(() => {
+    const reset = () => {
+      if (!document.hidden && eventsBadge > 0) {
+        eventsBadge = 0
+        document.title = 'hiworld monitoring'
+      }
+    }
+    window.addEventListener('focus', reset)
+    document.addEventListener('visibilitychange', reset)
+    return () => {
+      window.removeEventListener('focus', reset)
+      document.removeEventListener('visibilitychange', reset)
+    }
   })
 
   const mq = window.matchMedia('(max-width: 899px)')
@@ -143,7 +167,7 @@
           <HostDetailPage {hostId} />
         {:else if route === '/events'}
           <h1>{t('nav.events')}</h1>
-          <p data-testid="page-events">events placeholder (WE2)</p>
+          <EventsPage />
         {:else if route === '/settings'}
           <h1>{t('nav.settings')}</h1>
           <p data-testid="page-settings">settings placeholder (WD9)</p>

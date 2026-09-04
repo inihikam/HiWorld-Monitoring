@@ -53,7 +53,7 @@ describe('App shell (WD7+WD8)', () => {
     })
     at('#/events')
     await vi.waitFor(() => {
-      expect(screen.getByTestId('page-events')).toBeInTheDocument()
+      expect(screen.getByTestId('events-page')).toBeInTheDocument()
     })
     at('#/settings')
     await vi.waitFor(() => {

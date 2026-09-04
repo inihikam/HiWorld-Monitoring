@@ -7,7 +7,7 @@
   import ProcessTable from '../lib/detail/ProcessTable.svelte'
   import Badge from '../lib/m3/Badge.svelte'
   import { t } from '../lib/i18n.svelte.js'
-  import { historyStore, loadHistory, appendSnapshot } from '../lib/stores/history.svelte.js'
+  import { historyStore, loadHistory, parseHistory, appendSnapshot } from '../lib/stores/history.svelte.js'
   import { hostsStore, isStale } from '../lib/stores/hosts.svelte.js'
   import { fmtBytes, fmtTime } from '../lib/format.js'
   import { navigate } from '../lib/router.svelte.js'
@@ -30,7 +30,23 @@
   const diskSeries = $derived(diskMounts.map((m) => ({ mount: m, data: historyStore.series.disks[m] })))
   const processes = $derived(hostEntry?.latest?.processes ?? [])
 
+  // WE5: deep link ?at=<ts> (dari event detail) → range ±30 menit sekitar ts
   $effect(() => {
+    const at = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('at')
+    if (at) {
+      const center = Number(at)
+      if (Number.isFinite(center)) {
+        historyStore.host = hostId
+        historyStore.rangeMs = 3_600_000
+        historyStore.loading = true
+        historyStore.error = null
+        api(`/api/history?host=${encodeURIComponent(hostId)}&from=${center - 1_800_000}&to=${center + 1_800_000}`)
+          .then(async (res) => {
+            if (res.ok) historyStore.series = parseHistory(await res.json())
+          })
+        return
+      }
+    }
     loadHistory(api, hostId, rangeMs)
   })
 
