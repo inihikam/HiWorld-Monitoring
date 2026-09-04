@@ -9,6 +9,7 @@ use axum::response::IntoResponse;
 use axum::Json;
 
 use crate::api::{AppState, SharedState};
+use crate::hub::BroadcastMessage;
 
 /// HTTP fallback bila upgrade gagal / tanpa sesi.
 fn unauthorized() -> axum::response::Response {
@@ -174,4 +175,30 @@ fn to_json(msg: &crate::hub::BroadcastMessage) -> String {
         }),
     }
     .to_string()
+}
+
+/// Mirror task (WS5): subscribe hub → update AppState.latest_snapshots.
+/// Dijalankan sekali di main; sumber "hello" & REST tetap konsisten realtime.
+/// Lagged (kiri-kiri pesan saat banjir) → diabaikan, pesan berikutnya tetap
+/// diproses (state cukup: yang penting snapshot TERBARU).
+pub fn spawn_mirror_task(state: SharedState) -> tokio::task::JoinHandle<()> {
+    let mut rx = state.hub.subscribe();
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(BroadcastMessage::Snapshot(s)) => {
+                    state
+                        .latest_snapshots
+                        .lock()
+                        .unwrap()
+                        .insert(s.host_id.clone(), s);
+                }
+                Ok(_) => {} // event/host_status tidak masuk latest_snapshots
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!("mirror lagged, skipped {n}");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    })
 }
