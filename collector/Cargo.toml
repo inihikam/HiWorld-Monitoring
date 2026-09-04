@@ -1,0 +1,13 @@
+[package]
+name = "hiworld-collector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "hiworld-monitoring collector: polls agents, stores metrics, serves UI"
+
+[dependencies]
+hiworld-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+clap.workspace = true

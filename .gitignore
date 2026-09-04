@@ -1,2 +1,24 @@
-# Docs bersifat lokal, tidak dipush ke remote
+# Build artifacts
+/target/
+web/node_modules/
+web/dist/
+
+# Local docs (jangan pernah di-push)
 docs/
+
+# Environment & secrets
+.env
+*.local.toml
+agent.toml
+collector.toml
+
+# Database
+*.db
+*.db-journal
+*.sqlite*
+
+# OS/editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
