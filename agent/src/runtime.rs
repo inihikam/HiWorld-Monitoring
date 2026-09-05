@@ -40,7 +40,11 @@ pub fn spawn_sampler_loop(
             // agar tidak menahan executor.
             // sampling sinkron (baca /proc) di thread blocking — aman untuk
             // runtime current_thread pun (tidak pakai block_in_place).
-            let sample_res = tokio::task::spawn_blocking(move || {
+            // Sampler harus PERSIST antar iterasi — prev_cpu/prev_procs
+            // dibutuhkan utk delta CPU (ADR-1). Bug produksi: Sampler baru
+            // tiap loop = CPU selalu null.
+            eprintln!("SAMPLER: iterasi, interval={interval_ms}ms");
+            let sample_res = {
                 let source = SystemSource::new();
                 let mut clock = SystemClockTokio;
                 let mut sampler = Sampler::new(
@@ -51,17 +55,19 @@ pub fn spawn_sampler_loop(
                     collect_pss,
                 );
                 sampler.sample_once()
-            })
-            .await;
+            };
 
             match sample_res {
-                Ok(Ok(snap)) => {
+                Ok(snap) => {
+                    eprintln!("SAMPLER: ok cpu={:?}", snap.system.cpu_percent);
                     let mut st = state.lock().unwrap();
                     st.backlog.push(snap.timestamp_ms, snap.clone());
                     st.latest = Some(snap);
                 }
-                Ok(Err(e)) => tracing::error!("sample gagal: {e}"),
-                Err(e) => tracing::error!("sample task panic: {e}"),
+                Err(e) => {
+                    eprintln!("SAMPLER: gagal: {e}");
+                    tracing::error!("sample gagal: {e}");
+                }
             }
 
             tokio::time::sleep(Duration::from_millis(interval_ms)).await;

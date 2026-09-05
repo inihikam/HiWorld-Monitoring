@@ -377,12 +377,17 @@ async fn history(
     Query(p): Query<HistoryParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
     require_session(&state, &headers)?;
+    eprintln!("HIST-DEBUG: host={:?} from={} to={}", p.host, p.from, p.to);
     let rows = state
         .store
         .lock()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .query_system_history(&p.host, p.from, p.to)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    eprintln!("HIST-DEBUG: rows={}", rows.len());
+    if let Ok(st) = state.store.lock() {
+        eprintln!("HIST-DEBUG2: total rows via API conn = {:?}", st.count_raw());
+    }
     Ok(Json(
         rows.iter()
             .map(|r| {

@@ -39,7 +39,6 @@
       type="password"
       bind:value={password}
       testid="login-password"
-      error
     />
     {#if error}
       <p class="error" data-testid="login-error">{error}</p>

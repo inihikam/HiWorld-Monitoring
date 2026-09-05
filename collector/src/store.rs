@@ -173,6 +173,11 @@ impl Store {
         Ok(())
     }
 
+    /// Jumlah baris metrics_raw (untuk health/debug & test).
+    pub fn count_raw(&self) -> Result<i64> {
+        Ok(self.conn.query_row("SELECT COUNT(*) FROM metrics_raw", [], |r| r.get(0))?)
+    }
+
     pub fn query_system_history(
         &self,
         host_id: &str,
