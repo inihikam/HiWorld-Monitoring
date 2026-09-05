@@ -115,8 +115,8 @@ async fn api_alive_while_registrar_retries() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // berhentikan task
-    sampler.abort();
+    // sampler kini thread OS persist (tidak bisa abort) — test selesai
+    // dan proses test akan membersihkan thread saat keluar.
     registrar.abort();
 }
 

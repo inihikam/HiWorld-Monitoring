@@ -13,66 +13,54 @@ use crate::registrar::{
     resolve_host_id, RegisterAttempt, Registrar, RegistrarDeps, SystemHostname, SystemRegisterHttp,
     SystemRegistrarClock,
 };
-use crate::sampler::{Sampler, SystemSource};
+use crate::sampler::{Sampler, SystemClock, SystemSource};
+use hiworld_core::models::Snapshot;
 
 /// Spawn sampler loop: sample tiap interval → update state + backlog.
 /// Interval & sampling config diambil dari state.config (turbo-ready).
 /// Return JoinHandle agar test bisa abort.
-pub fn spawn_sampler_loop(
-    state: SharedState,
-    min_interval_ms_override: Option<u64>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
+/// Spawn sampler loop di THREAD OS KHUSUS — Sampler persist (prev_cpu/
+/// prev_procs bertahan) sehingga delta CPU valid (ADR-1). Snapshot masuk
+/// AppState via channel + thread penerus. Interval dari config (turbo-ready).
+pub fn spawn_sampler_loop(state: SharedState, min_interval_ms_override: Option<u64>) {
+    // Sampler PERSIST: jalankan di THREAD OS KHUSUS (bukan tokio task).
+    // Sampler memegang Box<dyn ProcSource> + &mut dyn Clock (tidak Send) —
+    // satu thread yang sama memilikinya selamanya → delta CPU valid (ADR-1).
+    // Snapshot dikirim ke async world via std::sync::mpsc.
+    let (tx, rx) = std::sync::mpsc::channel::<Snapshot>();
+    std::thread::spawn(move || {
+        let source = SystemSource::new();
+        let mut clock = SystemClockTokio;
+        let interval_ms = min_interval_ms_override.unwrap_or(10_000).clamp(1, 60_000);
+        let mut sampler = Sampler::new(
+            Box::new(source),
+            &mut clock,
+            Duration::from_millis(interval_ms),
+            10,
+            false,
+        );
         loop {
-            let (interval_ms, top_n, collect_pss) = {
-                let st = state.lock().unwrap();
-                (
-                    st.config.sampling.interval_ms,
-                    st.config.sampling.top_n_processes,
-                    st.config.sampling.collect_pss,
-                )
-            };
-            let interval_ms = min_interval_ms_override
-                .unwrap_or(interval_ms as u64)
-                .clamp(1, 60_000);
-
-            // Sampler sinkron (baca /proc cepat) → jalankan di blocking pool
-            // agar tidak menahan executor.
-            // sampling sinkron (baca /proc) di thread blocking — aman untuk
-            // runtime current_thread pun (tidak pakai block_in_place).
-            // Sampler harus PERSIST antar iterasi — prev_cpu/prev_procs
-            // dibutuhkan utk delta CPU (ADR-1). Bug produksi: Sampler baru
-            // tiap loop = CPU selalu null.
-            eprintln!("SAMPLER: iterasi, interval={interval_ms}ms");
-            let sample_res = {
-                let source = SystemSource::new();
-                let mut clock = SystemClockTokio;
-                let mut sampler = Sampler::new(
-                    Box::new(source),
-                    &mut clock,
-                    Duration::from_millis(interval_ms),
-                    top_n,
-                    collect_pss,
-                );
-                sampler.sample_once()
-            };
-
-            match sample_res {
+            match sampler.sample_once() {
                 Ok(snap) => {
-                    eprintln!("SAMPLER: ok cpu={:?}", snap.system.cpu_percent);
-                    let mut st = state.lock().unwrap();
-                    st.backlog.push(snap.timestamp_ms, snap.clone());
-                    st.latest = Some(snap);
+                    if tx.send(snap).is_err() {
+                        break; // penerima sudah mati
+                    }
                 }
-                Err(e) => {
-                    eprintln!("SAMPLER: gagal: {e}");
-                    tracing::error!("sample gagal: {e}");
-                }
+                Err(e) => tracing::error!("sample gagal: {e}"),
             }
-
-            tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+            std::thread::sleep(Duration::from_millis(interval_ms));
         }
-    })
+    });
+    // penerus snapshot → AppState (async side); recv() blocking di
+    // thread khusus agar tidak memblok executor
+    let state_rx = state.clone();
+    std::thread::spawn(move || {
+        while let Ok(snap) = rx.recv() {
+            let mut st = state_rx.lock().unwrap();
+            st.backlog.push(snap.timestamp_ms, snap.clone());
+            st.latest = Some(snap);
+        }
+    });
 }
 
 /// Build registrar task bila [collector] ada; None = tidak ada yang di-spawn
