@@ -655,6 +655,7 @@ dependencies = [
  "axum",
  "clap",
  "hiworld-core",
+ "libc",
  "reqwest",
  "serde",
  "serde_json",

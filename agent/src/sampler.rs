@@ -260,20 +260,32 @@ impl<'a> Sampler<'a> {
     }
 
     fn collect_disks(&self) -> Result<Vec<DiskMetrics>, ProcError> {
-        // v1: kapasitas disk dari statvfs dilakukan di C2; di sini hanya IO
-        // counters dari diskstats (per partisi). total/used=0 sementara.
+        // Kapasitas via statvfs (fix produksi: sebelumnya TODO "C2" yang tak
+        // pernah diisi → total/used/percent 0). IO counters dari diskstats.
         let stats = ProcFs::system().diskstats()?;
         let mounts = ProcFs::system().mounts()?;
+        // dedupe per device: beberapa mount bisa menunjuk device yang sama
+        let mut seen_devices: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut out = Vec::new();
         for m in &mounts {
             let dev_name = m.device.rsplit('/').next().unwrap_or("");
             if let Some(ds) = stats.iter().find(|d| d.name == dev_name) {
+                if !seen_devices.insert(m.device.clone()) {
+                    continue; // satu entri per device (root mount mewakili)
+                }
+                let (total_bytes, free_bytes) = statvfs_bytes(&m.mount);
+                let used_bytes = total_bytes.saturating_sub(free_bytes);
+                let percent = if total_bytes > 0 {
+                    used_bytes as f64 / total_bytes as f64 * 100.0
+                } else {
+                    0.0
+                };
                 out.push(DiskMetrics {
                     mount: m.mount.clone(),
                     device: m.device.clone(),
-                    total_bytes: 0, // C2: statvfs
-                    used_bytes: 0,  // C2: statvfs
-                    percent: 0.0,
+                    total_bytes,
+                    used_bytes,
+                    percent,
                     read_bytes: sectors_to_bytes(ds.sectors_read),
                     write_bytes: sectors_to_bytes(ds.sectors_written),
                 });
@@ -304,3 +316,20 @@ fn hostname() -> String {
 /// Refrensi CpuTime untuk fake source (test).
 #[allow(dead_code)]
 fn _type_witness(_c: &CpuTime) {}
+
+/// statvfs → (total, free) dalam bytes. Fallback (0,0) bila gagal.
+fn statvfs_bytes(mount: &str) -> (u64, u64) {
+    let c = match std::ffi::CString::new(mount) {
+        Ok(c) => c,
+        Err(_) => return (0, 0),
+    };
+    unsafe {
+        let mut st: libc::statvfs = std::mem::zeroed();
+        if libc::statvfs(c.as_ptr(), &mut st) != 0 {
+            return (0, 0);
+        }
+        let total = st.f_blocks as u64 * st.f_frsize as u64;
+        let free = st.f_bfree as u64 * st.f_frsize as u64;
+        (total, free)
+    }
+}
