@@ -39,6 +39,12 @@ pub struct CollectorConfig {
     /// Konfigurasi spike detection (SD1 — docs/specs/spike-detection.md §3.4).
     #[serde(default)]
     pub detector: DetectorConfig,
+    /// Telegram alert (TA1) — default disabled.
+    #[serde(default)]
+    pub telegram: crate::telegram::TelegramConfig,
+    /// Turbo mode (TM1) — default disabled.
+    #[serde(default)]
+    pub turbo: crate::turbo::TurboConfig,
 }
 
 fn default_poll_interval() -> u64 {

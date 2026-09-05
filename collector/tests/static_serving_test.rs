@@ -19,6 +19,8 @@ fn config_with_static(dir: Option<String>) -> CollectorConfig {
         agent_token: "agent-t".into(),
         poll_interval_ms: 10_000,
         detector: Default::default(),
+            telegram: Default::default(),
+            turbo: Default::default(),
     }
 }
 

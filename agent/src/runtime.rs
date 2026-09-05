@@ -13,7 +13,7 @@ use crate::registrar::{
     resolve_host_id, RegisterAttempt, Registrar, RegistrarDeps, SystemHostname, SystemRegisterHttp,
     SystemRegistrarClock,
 };
-use crate::sampler::{Sampler, SystemClock, SystemSource};
+use crate::sampler::{Sampler, SystemSource};
 use hiworld_core::models::Snapshot;
 
 /// Spawn sampler loop: sample tiap interval → update state + backlog.

@@ -54,12 +54,36 @@ fn main() {
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
 
     rt.block_on(async move {
-        // poller loop (koneksi store terpisah — WAL mendukung multi-koneksi)
+        // Poller PRODUKSI: detector + telegram + turbo + broadcast hub.
+        // (Bug deploy: sebelumnya Poller::new — semua fitur realtime mati.)
         let poller_store = Store::open(&state.config.db_path).expect("store poller");
-        let poller = hiworld_collector::poller::Poller::new(
+        let detector_store = Store::open(&state.config.db_path).expect("store detector");
+
+        // Telegram bridge (TA5) — bila [telegram] configured
+        let telegram = if config.telegram.is_configured() {
+            Some(hiworld_collector::telegram::bridge::AsyncAlertBridge::new(
+                config.telegram.clone(),
+                hiworld_collector::telegram::client::TelegramClient::new(&config.telegram),
+            ))
+        } else {
+            None
+        };
+
+        // Turbo (TM4): butuh agent_url yang baru diketahui setelah register.
+        // v1: turbo diset on saat host pertama terlihat (poller-side TODO v2),
+        // di sini None agar kompatibel — turbo tetap bisa dinyalakan v2.
+        let turbo: Option<hiworld_collector::turbo::TurboHolder> = None;
+
+        // hub SAMA dengan yang dipakai WS klien (dari AppState)
+        let poller = hiworld_collector::poller::Poller::with_everything(
             poller_store,
             state.config.agent_token.clone(),
             std::time::Duration::from_millis(state.config.poll_interval_ms),
+            config.detector.clone(),
+            detector_store,
+            state.hub.clone(),
+            telegram,
+            turbo,
         );
         tokio::spawn(poller.run_forever());
 

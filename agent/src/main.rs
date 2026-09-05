@@ -44,8 +44,8 @@ fn main() {
         .expect("tokio runtime");
 
     rt.block_on(async move {
-        // sampler loop
-        let sampler = hiworld_agent::runtime::spawn_sampler_loop(state.clone(), None);
+        // sampler loop (thread OS persist)
+        hiworld_agent::runtime::spawn_sampler_loop(state.clone(), None);
 
         // registrar (auto-register, Q1) — hanya bila [collector] ada (SR-AC-005)
         if has_collector {
@@ -55,7 +55,6 @@ fn main() {
         } else {
             eprintln!("hiworld-agent: tanpa [collector] — mode standalone (tidak register)");
         }
-        std::mem::forget(sampler);
 
         let app = router(state);
         let listener = tokio::net::TcpListener::bind(&bind)

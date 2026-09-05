@@ -69,6 +69,24 @@ impl Poller {
         }
     }
 
+    /// Poller PRODUKSI lengkap: detector + hub + telegram + turbo.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_everything(
+        store: Store,
+        agent_token: String,
+        interval: Duration,
+        cfg: crate::api::DetectorConfig,
+        detector_store: Store,
+        hub: crate::hub::BroadcastHub,
+        telegram: Option<crate::telegram::bridge::AsyncAlertBridge>,
+        turbo: Option<crate::turbo::TurboHolder>,
+    ) -> Self {
+        let mut p = Self::with_detector_hub(store, agent_token, interval, cfg, detector_store, Some(hub));
+        p.telegram = telegram;
+        p.turbo = turbo;
+        p
+    }
+
     /// Poller dengan detector aktif (SD6) — tanpa broadcast.
     pub fn with_detector(
         store: Store,
@@ -126,7 +144,7 @@ impl Poller {
     }
 
     /// Konstruktor internal bersama.
-    fn with_detector_hub(
+    pub fn with_detector_hub(
         store: Store,
         agent_token: String,
         interval: Duration,

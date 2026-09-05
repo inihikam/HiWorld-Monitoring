@@ -23,6 +23,8 @@ fn test_config() -> CollectorConfig {
         agent_token: "agent-t".into(),
         poll_interval_ms: 10_000,
         detector: Default::default(),
+            telegram: Default::default(),
+            turbo: Default::default(),
     }
 }
 
