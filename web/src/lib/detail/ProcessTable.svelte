@@ -55,7 +55,7 @@
         {#each visible as p (p.pid)}
           <tr data-testid="proc-{p.pid}">
             <td class="mono">{p.pid}</td>
-            <td>{p.name}</td>
+            <td>{p.comm ?? p.name}</td>
             <td class="unit hide-mobile">{p.unit || '—'}</td>
             <td>
               <div class="cell" class:high={(p.cpu_percent ?? 0) >= 85}>
