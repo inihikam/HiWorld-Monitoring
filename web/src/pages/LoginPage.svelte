@@ -6,6 +6,7 @@
   import { login } from '../lib/api.js'
   import { navigate } from '../lib/router.svelte.js'
 
+  let { onLogin = null } = $props()
   let username = $state('')
   let password = $state('')
   let error = $state(null)
@@ -18,6 +19,7 @@
     try {
       const ok = await login(username, password)
       if (ok) {
+        onLogin?.()
         navigate('/')
       } else {
         error = t('login.error')

@@ -50,6 +50,13 @@
     ws.connect()
   }
 
+  // WD8 fix produksi: setelah login sukses dari LoginPage — authed true
+  // dan start WS (sebelumnya authed tetap false → redirect balik login).
+  function handleLoginSuccess() {
+    authed = true
+    if (!ws) startWs()
+  }
+
   // probe sesi saat init (WD-AC-010); sukses → mulai WS
   $effect(() => {
     checkAuth().then((ok) => {
@@ -118,7 +125,7 @@
 </script>
 
 {#if route === '/login' || authed === false}
-  <LoginPage />
+  <LoginPage onLogin={handleLoginSuccess} />
 {:else if authed === null}
   <main class="boot" data-testid="boot-probe">
     <p>{t('common.loading')}</p>
