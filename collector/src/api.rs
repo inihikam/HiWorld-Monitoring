@@ -158,6 +158,7 @@ pub fn router_with_static(state: Arc<AppState>, static_dir: &Option<String>) -> 
         .route("/api/events", get(events))
         .route("/ws", get(crate::ws::ws_handler))
         .nest("/api", Router::new().fallback(api_not_found))
+        .route("/", get(index_no_cache(static_dir)))
         .fallback_service(serve_dashboard(static_dir))
         .with_state(state)
 }
@@ -181,6 +182,37 @@ pub fn serve_dashboard(
                 tower_http::services::ServeFile::new("/nonexistent-wd2/index.html"),
             )
         }
+    }
+}
+
+/// GET / → index.html DENGAN Cache-Control: no-cache. Tanpa ini browser
+/// bisa mem-cache index.html lama yang reference bundle JS lama (bug login
+/// produksi 2026-09-05): aset hashed aman di-cache, index tidak boleh.
+fn index_no_cache(
+    static_dir: &Option<String>,
+) -> impl Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = axum::response::Response> + Send>>
+       + Clone
+       + Send {
+    let dir = static_dir.clone();
+    move || {
+        let dir = dir.clone();
+        Box::pin(async move {
+            let path = dir
+                .as_ref()
+                .map(|d| std::path::Path::new(d).join("index.html"));
+            match path {
+                Some(p) => match tokio::fs::read(&p).await {
+                    Ok(body) => axum::response::Response::builder()
+                        .status(StatusCode::OK)
+                        .header("content-type", "text/html; charset=utf-8")
+                        .header("cache-control", "no-cache, must-revalidate")
+                        .body(axum::body::Body::from(body))
+                        .unwrap(),
+                    Err(_) => StatusCode::NOT_FOUND.into_response(),
+                },
+                None => StatusCode::NOT_FOUND.into_response(),
+            }
+        })
     }
 }
 
